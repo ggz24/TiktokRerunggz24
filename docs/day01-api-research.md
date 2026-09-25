@@ -19,7 +19,7 @@
   "items_sold": 82
 }
 
-1.2 Endpoint: search_product (ค้นหาสินค้า)
+###1.2 Endpoint: search_product (ค้นหาสินค้า)
 Method: GET
 
 URL: https://seller-th.tiktok.com/api/product/search_product
