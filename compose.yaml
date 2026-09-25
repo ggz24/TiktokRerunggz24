@@ -37,6 +37,8 @@ services:
       API_HOST: 0.0.0.0
       DATABASE_URL: postgresql://livehub:livehub_dev@postgres:5432/livehub
       REDIS_URL: redis://redis:6379
+      ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY:?Run npm run setup:local first}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run npm run setup:local first}
     ports: ['127.0.0.1:4000:4000']
     depends_on:
       postgres: { condition: service_healthy }
@@ -58,9 +60,10 @@ services:
     build: { context: ., target: web }
     environment:
       APP_USERNAME: ${APP_USERNAME:-demo}
-      APP_PASSWORD: ${APP_PASSWORD:-demo1234}
-      SESSION_SECRET: ${SESSION_SECRET:-local-development-only-change-me-before-deploying}
+      APP_PASSWORD: ${APP_PASSWORD:?Run npm run setup:local first}
+      SESSION_SECRET: ${SESSION_SECRET:?Run npm run setup:local first}
       API_INTERNAL_URL: http://api:4000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run npm run setup:local first}
     ports: ['127.0.0.1:3100:3100']
     depends_on:
       api: { condition: service_healthy }

@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import { createClient } from 'redis';
 import { createApp } from './app.js';
+import { createPgAccountStore, ensureAccountTable } from './account-store.js';
+import { parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
 
 const port = Number(process.env.API_PORT ?? 4000);
 const databaseUrl =
@@ -13,19 +15,37 @@ const redis = createClient({
 });
 redis.on('error', () => {});
 
-const app = createApp({
-  postgres: async () => {
-    await pool.query('SELECT 1');
+const keyHex = process.env.ACCOUNT_ENCRYPTION_KEY;
+const internalToken = process.env.INTERNAL_API_TOKEN;
+if ((keyHex === undefined) !== (internalToken === undefined)) {
+  throw new Error('Account import configuration is incomplete.');
+}
+const accountConfig: AccountConfig | undefined =
+  keyHex && internalToken
+    ? {
+        store: createPgAccountStore(pool),
+        encryptionKey: parseEncryptionKeyHex(keyHex),
+        internalToken,
+      }
+    : undefined;
+if (accountConfig) await ensureAccountTable(pool);
+
+const app = createApp(
+  {
+    postgres: async () => {
+      await pool.query('SELECT 1');
+    },
+    redis: async () => {
+      if (!redis.isOpen) await redis.connect();
+      await redis.ping();
+    },
+    worker: async () => {
+      if (!redis.isOpen) await redis.connect();
+      return Boolean(await redis.get('livehub:worker:heartbeat'));
+    },
   },
-  redis: async () => {
-    if (!redis.isOpen) await redis.connect();
-    await redis.ping();
-  },
-  worker: async () => {
-    if (!redis.isOpen) await redis.connect();
-    return Boolean(await redis.get('livehub:worker:heartbeat'));
-  },
-});
+  accountConfig,
+);
 
 async function shutdown() {
   await app.close();

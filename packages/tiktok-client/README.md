@@ -17,6 +17,9 @@
 - `redactRequestForLog()` ซ่อน URL path, query, body และค่า header ก่อนบันทึก log
 - `parseProxyConfig()` ตรวจ URL ของ HTTP/HTTPS/SOCKS5/SOCKS5H proxy โดยไม่รับ credential ใน URL; ยังไม่มี network agent หรือการเชื่อม proxy จริง
 - `nextRetryDelayMs()` คำนวณ exponential backoff แบบ pure function เฉพาะเมื่อ caller ระบุว่าเป็นงานที่ retry ได้และ idempotent; ยังไม่มีการส่ง request หรือ retry อัตโนมัติ
+- `parseAccountImportCurl()` อ่าน cURL **จริงที่ผู้ใช้วางในฟอร์มตอนรันแอป** สำหรับคำขอ `HEAD https://www.tiktok.com/api/update/profile/` เท่านั้น; คืน cookie ให้ backend ใช้ในหน่วยความจำ และไม่รัน shell หรือส่ง request เอง รับเฉพาะข้อความดิบจาก DevTools ไม่รับ URL ที่ถูกแปลงเป็นลิงก์ Markdown
+
+เมื่อเปิด flow เพิ่มบัญชีจริง backend ต้องเก็บ cookie ที่รับมาด้วยวิธีเข้ารหัสและจำกัดสิทธิ์ ห้ามส่งค่าไป browser อีกหลังบันทึก ห้ามเขียนลง log/test/fixture/repo และต้องตรวจบัญชีกับ TikTok ก่อนแสดงว่าเชื่อมแล้ว ข้อมูลที่ผู้ใช้วางในแชทไม่ถูกนำไปใส่ source code
 
 ตัวอย่างที่ปลอดภัยสำหรับพัฒนาในเครื่อง:
 

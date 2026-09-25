@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   CircleCheck,
   LogOut,
@@ -64,19 +64,41 @@ const sampleVideos = [
   { name: 'demo-intro-04.mp4', size: '16.7 MB', code: '04' },
 ];
 
+type SavedAccount = {
+  id: string;
+  alias: string;
+  claimedHandle?: string | null;
+  verifiedHandle?: string | null;
+  avatarUrl?: string | null;
+  verifiedAt?: string | null;
+  verificationStatus: 'connected' | 'pending_verification' | 'disconnected';
+  probe: 'responded' | 'failed' | 'not_run';
+  probeHttpStatus?: number | null;
+  createdAt: string;
+};
+
 function Btn({
   children,
   onClick,
   tone = 'default',
   className = '',
+  disabled = false,
+  type = 'button',
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   tone?: 'default' | 'pink' | 'green' | 'cyan' | 'danger';
   className?: string;
+  disabled?: boolean;
+  type?: 'button' | 'submit';
 }) {
   return (
-    <button className={'cyber-btn ' + tone + ' ' + className} onClick={onClick}>
+    <button
+      className={'cyber-btn ' + tone + ' ' + className}
+      onClick={onClick}
+      disabled={disabled}
+      type={type}
+    >
       {children}
     </button>
   );
@@ -125,6 +147,14 @@ export default function CyberShell({ section, username }: { section: Page; usern
     'checking',
   );
   const [dependencies, setDependencies] = useState<Record<string, string>>({});
+  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [accountsError, setAccountsError] = useState('');
+  const [accountAlias, setAccountAlias] = useState('');
+  const [accountCurl, setAccountCurl] = useState('');
+  const [accountSubmitting, setAccountSubmitting] = useState(false);
+  const [accountFormError, setAccountFormError] = useState('');
+  const [verifyingAccountId, setVerifyingAccountId] = useState<string | null>(null);
   useEffect(() => {
     const update = () => setClock(new Date().toLocaleTimeString('th-TH', { hour12: false }));
     update();
@@ -148,6 +178,27 @@ export default function CyberShell({ section, username }: { section: Page; usern
       active = false;
     };
   }, []);
+  const loadAccounts = useCallback(async () => {
+    setAccountsLoading(true);
+    setAccountsError('');
+    try {
+      const response = await fetch('/api/accounts', { cache: 'no-store' });
+      if (!response.ok) throw new Error('load failed');
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) {
+        throw new Error('invalid response');
+      }
+      setAccounts(data.items as SavedAccount[]);
+    } catch {
+      setAccounts([]);
+      setAccountsError('โหลดบัญชีไม่สำเร็จ กรุณาลองอีกครั้ง');
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
   const notify = (value: string) => {
     setToast(value);
     window.setTimeout(() => setToast(''), 3500);
@@ -157,18 +208,162 @@ export default function CyberShell({ section, username }: { section: Page; usern
     router.replace('/login');
     router.refresh();
   }
+  function closeModal() {
+    setModal('');
+    setAccountAlias('');
+    setAccountCurl('');
+    setAccountFormError('');
+  }
+  async function saveAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (accountSubmitting) return;
+    if (!accountAlias.trim() || !accountCurl.trim()) {
+      setAccountFormError('กรอกชื่อเรียกและวาง cURL ก่อนบันทึก');
+      return;
+    }
+    setAccountSubmitting(true);
+    setAccountFormError('');
+    try {
+      const response = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias: accountAlias.trim(), curl: accountCurl }),
+      });
+      if (response.status === 422) {
+        throw new Error('TikTok ไม่ยืนยัน session นี้ กรุณาคัดลอก cURL ใหม่จากบัญชีที่เข้าสู่ระบบ');
+      }
+      if (!response.ok) throw new Error('บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง');
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || !('item' in data)) {
+        throw new Error('invalid response');
+      }
+      // Never keep the pasted session in the form after a successful save.
+      setAccountCurl('');
+      setAccountAlias('');
+      closeModal();
+      notify('เชื่อมต่อบัญชี TikTok แล้ว');
+      void loadAccounts();
+    } catch (error) {
+      // Only display our own fixed text; a server response could reflect pasted cURL.
+      setAccountFormError(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ');
+    } finally {
+      setAccountSubmitting(false);
+    }
+  }
+  async function verifyAccount(id: string) {
+    if (verifyingAccountId) return;
+    setVerifyingAccountId(id);
+    try {
+      const response = await fetch(`/api/accounts/${encodeURIComponent(id)}/verify`, {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('verify failed');
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || !('item' in data)) {
+        throw new Error('invalid response');
+      }
+      const item = data.item as SavedAccount;
+      setAccounts((current) => current.map((account) => (account.id === id ? item : account)));
+      notify(
+        item.verificationStatus === 'connected'
+          ? 'บัญชีเชื่อมต่อแล้ว'
+          : 'session หมดอายุหรือใช้ไม่ได้',
+      );
+    } catch {
+      notify('ตรวจการเชื่อมต่อไม่สำเร็จ กรุณาลองอีกครั้ง');
+    } finally {
+      setVerifyingAccountId(null);
+    }
+  }
+  function savedAccountCard(account: SavedAccount) {
+    const connected = account.verificationStatus === 'connected';
+    const disconnected = account.verificationStatus === 'disconnected';
+    return (
+      <article className="cyber-account-card cyber-saved-card" key={account.id}>
+        <div className="cyber-card-head">
+          <span>
+            <i className="cyber-square" /> บัญชีที่เพิ่ม
+          </span>
+          <Badge tone={connected ? 'green' : disconnected ? 'pink' : 'yellow'}>
+            {connected ? 'เชื่อมต่อแล้ว' : disconnected ? 'session ใช้ไม่ได้' : 'รอตรวจบัญชี'}
+          </Badge>
+        </div>
+        <div className="cyber-card-body">
+          <div className="cyber-avatar avatar-0">
+            {connected && account.avatarUrl ? (
+              <img
+                src={account.avatarUrl}
+                alt={`รูปบัญชี ${account.verifiedHandle ?? ''}`}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <>
+                <span>▶</span>
+                <small>บัญชี</small>
+              </>
+            )}
+          </div>
+          <div className="cyber-account-info">
+            <div className="cyber-account-name">
+              <span className="cyber-initial">{account.alias.charAt(0).toUpperCase()}</span>
+              <strong>{account.alias}</strong>
+            </div>
+            <div className="cyber-handle">
+              {connected && account.verifiedHandle
+                ? `@${account.verifiedHandle} · จาก TikTok`
+                : account.claimedHandle
+                  ? `ชื่อที่อ้างจาก cURL: ${account.claimedHandle}`
+                  : 'ยังไม่ทราบชื่อบัญชี TikTok'}
+            </div>
+            <div className="cyber-chip-row">
+              <Badge tone={connected ? 'green' : disconnected ? 'pink' : 'yellow'}>
+                {connected
+                  ? 'อ่านข้อมูลบัญชีจาก session สำเร็จ'
+                  : disconnected
+                    ? 'session ไม่ผ่านการตรวจล่าสุด'
+                    : 'ตรวจ session อีกครั้งได้'}
+              </Badge>
+            </div>
+            {connected && account.verifiedAt && (
+              <div className="cyber-account-note">
+                ตรวจล่าสุด {new Date(account.verifiedAt).toLocaleString('th-TH')}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="cyber-card-actions">
+          <Btn
+            tone="cyan"
+            onClick={() => void verifyAccount(account.id)}
+            disabled={verifyingAccountId !== null}
+          >
+            <RefreshCw size={13} />{' '}
+            {verifyingAccountId === account.id ? 'กำลังตรวจ…' : 'ตรวจการเชื่อมต่อ'}
+          </Btn>
+          <Btn tone="green" disabled>
+            <Play size={12} fill="currentColor" /> เริ่มไลฟ์
+          </Btn>
+          <Btn disabled>
+            <ShoppingCart size={13} /> เพิ่มสินค้า
+          </Btn>
+          <span className="cyber-account-note">
+            {connected
+              ? 'บัญชีเชื่อมแล้ว · ไลฟ์และสินค้ายังรอโมดูลของทีม'
+              : 'กรุณาตรวจการเชื่อมต่อหรือคัดลอก cURL ใหม่'}
+          </span>
+        </div>
+      </article>
+    );
+  }
   function accountCard(name: string, handle: string, idx: number) {
     return (
       <article className="cyber-account-card" key={name}>
         <div className="cyber-card-head">
           <span>
-            <i className="cyber-square" /> SLEEP
+            <i className="cyber-square" /> ข้อมูลตัวอย่าง
           </span>
           <span className="cyber-card-head-right">
-            ♂ CYBER HOST{' '}
-            <Btn tone="green" onClick={() => notify('บัญชีตัวอย่าง: พร้อมตรวจสอบ')}>
-              ตรวจ
-            </Btn>
+            <Badge tone="dim">MOCK ONLY</Badge>
           </span>
         </div>
         <div className="cyber-card-body">
@@ -185,29 +380,29 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <div className="cyber-chip-row">
               <Badge tone="cyan">▣ {handle}</Badge>
               <Badge tone="dim">▥ HD</Badge>
-              <Badge tone="green">▣ วิดีโอพร้อม</Badge>
+              <Badge tone="dim">▣ วิดีโอตัวอย่าง</Badge>
             </div>
             <div className="cyber-chip-row">
-              <Badge tone="green">● คอมเมนต์</Badge>
-              <Badge tone="green">▣ ส่งแชท</Badge>
-              <Badge tone="green">▣ AI ตอบ</Badge>
-              <Badge tone="cyan">⚡ AUTO</Badge>
+              <Badge tone="dim">● คอมเมนต์ตัวอย่าง</Badge>
+              <Badge tone="dim">▣ แชทตัวอย่าง</Badge>
+              <Badge tone="dim">▣ AI ตัวอย่าง</Badge>
+              <Badge tone="dim">⚡ MOCK</Badge>
             </div>
           </div>
         </div>
         <div className="cyber-card-actions">
-          <Btn tone="green" onClick={() => notify('เริ่มไลฟ์ได้เมื่อเชื่อม worker และบัญชีทดสอบ')}>
+          <Btn tone="green" disabled>
             <Play size={12} fill="currentColor" /> เริ่มไลฟ์
           </Btn>
-          <Btn onClick={() => setModal('สถานะบัญชี')}>สถานะ</Btn>
-          <Btn onClick={() => router.push('/products')}>
+          <Btn disabled>สถานะ</Btn>
+          <Btn disabled>
             <ShoppingCart size={13} /> เพิ่มสินค้า
           </Btn>
-          <Btn onClick={() => router.push('/settings')}>
+          <Btn disabled>
             <Settings size={13} /> ตั้งค่า
           </Btn>
-          <Btn onClick={() => setModal('แก้ไขบัญชี')}>แก้ไข</Btn>
-          <Btn tone="danger" onClick={() => notify('ข้อมูลตัวอย่างไม่ได้ถูกลบ')}>
+          <Btn disabled>แก้ไข</Btn>
+          <Btn tone="danger" disabled>
             ลบ
           </Btn>
         </div>
@@ -221,14 +416,34 @@ export default function CyberShell({ section, username }: { section: Page; usern
           <Btn tone="pink" onClick={() => setModal('เพิ่มบัญชี')}>
             <Plus size={14} /> เพิ่มบัญชี
           </Btn>
-          <Btn onClick={() => notify('ข้อมูลตัวอย่างล่าสุดแล้ว')}>
-            <RefreshCw size={13} /> รีเฟรชยอด
+          <Btn onClick={() => void loadAccounts()}>
+            <RefreshCw size={13} /> รีเฟรชบัญชี
           </Btn>
           <Btn onClick={() => router.push('/videos')}>
             <Upload size={13} /> อัปโหลดวิดีโอ
           </Btn>
           <Btn onClick={() => setModal('ภาพรวมทุกบัญชี')}>▣ ภาพรวม</Btn>
           <Btn onClick={() => setModal('Telegram')}>▣ Telegram</Btn>
+        </div>
+        <div className="cyber-account-section-head">
+          <h2>บัญชีที่เพิ่ม</h2>
+          <span>ระบบอ่านตัวตนจาก TikTok และแสดงผลการเชื่อมต่อจริง</span>
+        </div>
+        {accountsError && (
+          <p className="cyber-account-error" role="alert">
+            {accountsError}
+          </p>
+        )}
+        {accountsLoading ? (
+          <p className="cyber-account-empty">กำลังโหลดบัญชี…</p>
+        ) : accounts.length ? (
+          <div className="cyber-account-grid">{accounts.map(savedAccountCard)}</div>
+        ) : (
+          <p className="cyber-account-empty">ยังไม่มีบัญชีที่เพิ่มด้วย cURL</p>
+        )}
+        <div className="cyber-account-section-head cyber-demo-section">
+          <h2>ข้อมูลตัวอย่าง</h2>
+          <span>ใช้ดูหน้าตาเว็บเท่านั้น</span>
         </div>
         <div className="cyber-account-grid">
           {accountCard('Demo Shop A', '@demo_shop_a', 0)}
@@ -613,7 +828,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <i /> 0 <small>LIVE</small>
           </div>
           <div className="cyber-stat red">
-            1 / 2 <small>บัญชี</small>
+            {accountsLoading ? '…' : accounts.length} <small>บัญชีที่เพิ่ม</small>
           </div>
           <div className="cyber-stat ready">
             <i /> {systemStatus === 'ready' ? 'ระบบ' : 'รอ'}
@@ -627,14 +842,20 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <span>●</span>
             <div>
               <strong>{username}</strong>
-              <small>ระบบตัวอย่าง · 2 บัญชี</small>
+              <small>บัญชีตัวอย่างแสดงแยกด้านล่าง</small>
             </div>
             <Btn tone="danger" onClick={logout}>
               <LogOut size={12} /> ออก
             </Btn>
           </div>
           <div className="cyber-top-actions">
-            <Btn onClick={() => notify('แสดงข้อมูลตัวอย่างล่าสุดแล้ว')}>
+            <Btn
+              onClick={() =>
+                section === 'accounts' || section === 'dashboard'
+                  ? void loadAccounts()
+                  : notify('แสดงข้อมูลตัวอย่างล่าสุดแล้ว')
+              }
+            >
               <RefreshCw size={13} /> รีเฟรช
             </Btn>
             <Btn tone="pink" onClick={() => setModal('เพิ่มบัญชี')}>
@@ -662,49 +883,111 @@ export default function CyberShell({ section, username }: { section: Page; usern
         </div>
       )}
       {modal && (
-        <div className="cyber-modal-backdrop" onClick={() => setModal('')}>
+        <div className="cyber-modal-backdrop" onClick={closeModal}>
           <div className="cyber-modal" onClick={(e) => e.stopPropagation()}>
             <div className="cyber-modal-head">
               <h2>▣ {modal}</h2>
-              <button onClick={() => setModal('')}>
+              <button onClick={closeModal}>
                 <X size={17} />
               </button>
             </div>
-            <div className="cyber-modal-body">
-              {modal === 'ภาพรวมทุกบัญชี' ? (
-                <>
-                  <p>รวม 2 · 🔴 ไลฟ์ 0 · ⚪ หยุด 2 · ⚠ ปัญหา 0</p>
-                  <div className="cyber-row">
-                    <span>Demo Shop A</span>
-                    <Badge tone="yellow">หยุด</Badge>
-                  </div>
-                  <div className="cyber-row">
-                    <span>Demo Shop B</span>
-                    <Badge tone="yellow">หยุด</Badge>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p>ส่วนนี้เป็นหน้าตัวอย่างสำหรับการเชื่อมงานของทีม</p>
+            {modal === 'เพิ่มบัญชี' ? (
+              <form onSubmit={saveAccount}>
+                <div className="cyber-modal-body cyber-account-form">
+                  <p>
+                    วาง Copy as cURL (bash) ต้นฉบับจาก DevTools ของบัญชีคุณ
+                    อย่าใช้ข้อความที่ผ่านแชทหรือถูกตัดทอน ระบบจะอ่านตัวตนจาก session ของ TikTok
+                    และบันทึกเมื่อเชื่อมต่อสำเร็จเท่านั้น
+                  </p>
                   <label>
-                    ชื่อรายการ
-                    <input placeholder="กรอกข้อมูลตัวอย่าง" />
+                    ชื่อเรียกบัญชี
+                    <input
+                      value={accountAlias}
+                      onChange={(event) => setAccountAlias(event.target.value)}
+                      placeholder="เช่น ร้านหลัก"
+                      maxLength={80}
+                      autoComplete="off"
+                      required
+                    />
                   </label>
-                </>
-              )}
-            </div>
-            <div className="cyber-modal-actions">
-              <Btn onClick={() => setModal('')}>ปิด</Btn>
-              <Btn
-                tone="pink"
-                onClick={() => {
-                  setModal('');
-                  notify('บันทึกตัวอย่างแล้ว');
-                }}
-              >
-                บันทึก
-              </Btn>
-            </div>
+                  <label>
+                    cURL จาก DevTools
+                    <textarea
+                      value={accountCurl}
+                      onChange={(event) => setAccountCurl(event.target.value)}
+                      placeholder="วางคำสั่ง cURL ที่คัดลอกจาก DevTools"
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                    />
+                  </label>
+                  <p className="cyber-account-secret-hint">
+                    ข้อมูลนี้มี session ของ TikTok อย่าแชร์ในแชทหรือภาพหน้าจอ
+                  </p>
+                  {accountFormError && (
+                    <p className="cyber-account-error" role="alert">
+                      {accountFormError}
+                    </p>
+                  )}
+                </div>
+                <div className="cyber-modal-actions">
+                  <Btn onClick={closeModal}>ปิด</Btn>
+                  <Btn tone="pink" type="submit" disabled={accountSubmitting}>
+                    {accountSubmitting ? 'กำลังบันทึก…' : 'บันทึกบัญชี'}
+                  </Btn>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div className="cyber-modal-body">
+                  {modal === 'ภาพรวมทุกบัญชี' ? (
+                    <>
+                      <p>บัญชีที่เพิ่ม {accounts.length} · ไลฟ์จริง 0 · ข้อมูลตัวอย่าง 2</p>
+                      {accounts.map((account) => (
+                        <div className="cyber-row" key={account.id}>
+                          <span>{account.alias}</span>
+                          <Badge
+                            tone={account.verificationStatus === 'connected' ? 'green' : 'yellow'}
+                          >
+                            {account.verificationStatus === 'connected'
+                              ? 'เชื่อมต่อแล้ว'
+                              : 'ยังไม่เชื่อมต่อ'}
+                          </Badge>
+                        </div>
+                      ))}
+                      <div className="cyber-row">
+                        <span>Demo Shop A</span>
+                        <Badge tone="dim">MOCK</Badge>
+                      </div>
+                      <div className="cyber-row">
+                        <span>Demo Shop B</span>
+                        <Badge tone="dim">MOCK</Badge>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p>ส่วนนี้เป็นหน้าตัวอย่างสำหรับการเชื่อมงานของทีม</p>
+                      <label>
+                        ชื่อรายการ
+                        <input placeholder="กรอกข้อมูลตัวอย่าง" />
+                      </label>
+                    </>
+                  )}
+                </div>
+                <div className="cyber-modal-actions">
+                  <Btn onClick={closeModal}>ปิด</Btn>
+                  <Btn
+                    tone="pink"
+                    onClick={() => {
+                      closeModal();
+                      notify('บันทึกตัวอย่างแล้ว');
+                    }}
+                  >
+                    บันทึก
+                  </Btn>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
