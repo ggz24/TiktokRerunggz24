@@ -80,3 +80,5 @@ npm run dev
 
 สมาชิกทีมดูจุดรับงาน วิธีสร้าง branch และข้อกำหนดข้อมูลลับใน [CONTRIBUTING.md](CONTRIBUTING.md)
 ผลตรวจ Day 03 จากการติดตั้งใหม่และ Docker หลัง restart อยู่ใน [docs/day03-verification.md](docs/day03-verification.md)
+
+สำหรับการย้ายไปทำต่อบนเครื่องอื่น ดู [คู่มือย้ายเครื่อง](transfer/README.md) และ [สรุปส่งต่องาน](docs/handoff-new-computer.md) ชุดสำรองเข้ารหัสอยู่ใน Git LFS; กุญแจถอดรหัสต้องรับและเก็บแยกจาก repo สาธารณะ

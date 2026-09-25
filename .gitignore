@@ -11,3 +11,6 @@ apps/*/dist
 packages/*/dist
 work
 *.log
+transfer/*.key
+transfer/*.tar
+transfer/*.dump

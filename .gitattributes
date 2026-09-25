@@ -1,1 +1,2 @@
 * text=auto eol=lf
+transfer/*.enc filter=lfs diff=lfs merge=lfs -text
