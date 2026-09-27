@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: livehub
       POSTGRES_PASSWORD: livehub_dev
@@ -15,6 +16,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports: ['127.0.0.1:6380:6379']
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']

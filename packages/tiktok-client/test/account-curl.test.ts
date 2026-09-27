@@ -36,6 +36,23 @@ test('accepts the Cookie header form and harmless optional cURL syntax', () => {
   });
 });
 
+test('accepts matching Markdown links and escaped underscores in cookie names', () => {
+  const referer = 'https://www.tiktok.com/@sample.user';
+  const input = [
+    `curl --url '[${profileUrl}](${profileUrl})' \\`,
+    `-X 'HEAD' \\`,
+    `-b '\\_ttp=fake_value; sessionid=fake-session' \\`,
+    `-H 'referer: [${referer}](${referer})'`,
+  ].join('\n');
+
+  assert.deepEqual(parseAccountImportCurl(input), {
+    method: 'HEAD',
+    url: profileUrl,
+    cookieHeader: '_ttp=fake_value; sessionid=fake-session',
+    claimedHandle: 'sample.user',
+  });
+});
+
 test('rejects other endpoints, methods, bodies, and duplicated options', () => {
   const baseline = `curl --url '${profileUrl}' -X HEAD -b '${fakeCookie}'`;
   for (const input of [
@@ -57,10 +74,16 @@ test('rejects other endpoints, methods, bodies, and duplicated options', () => {
   }
 });
 
-test('rejects Markdown-wrapped URLs and shell syntax', () => {
+test('rejects malformed or mismatched Markdown links and shell syntax', () => {
   const baseline = `curl --url '${profileUrl}' -X HEAD -b '${fakeCookie}'`;
+  const referer = 'https://www.tiktok.com/@sample.user';
   for (const input of [
-    baseline.replace(profileUrl, `[${profileUrl}](${profileUrl})`),
+    baseline.replace(profileUrl, `[${profileUrl}](https://bad.example/)`),
+    baseline.replace(profileUrl, `[https://bad.example/](${profileUrl})`),
+    baseline.replace(profileUrl, `[${profileUrl}](${profileUrl}`),
+    `${baseline} -H 'referer: [${referer}](https://www.tiktok.com/@other.user)'`,
+    `${baseline} -H 'referer: [https://bad.example/](${referer})'`,
+    `${baseline} -H 'referer: [${referer}](${referer}'`,
     `${baseline} ; echo unsafe`,
     `${baseline} && echo unsafe`,
     `${baseline} | cat`,
@@ -71,6 +94,17 @@ test('rejects Markdown-wrapped URLs and shell syntax', () => {
     `curl --url '${profileUrl}' -X HEAD -b 'tracking=fake'`,
   ]) {
     assert.throws(() => parseAccountImportCurl(input));
+  }
+});
+
+test('rejects Markdown-escaped cookie values and unsupported cookie-name escapes', () => {
+  const valueWithEscape = `curl --url '${profileUrl}' -X HEAD -b 'sessionid=fake\\_value'`;
+  assert.throws(() => parseAccountImportCurl(valueWithEscape));
+
+  for (const cookie of ['sessionid=fake; \\other=fake', 'sessionid=fake; \\\\_ttp=fake']) {
+    assert.throws(() =>
+      parseAccountImportCurl(`curl --url '${profileUrl}' -X HEAD -b '${cookie}'`),
+    );
   }
 });
 

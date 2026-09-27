@@ -1,5 +1,6 @@
 node_modules
 **/node_modules
+.git
 .next
 **/.next
 dist
@@ -9,3 +10,5 @@ dist
 **/.env*
 *.log
 work
+transfer
+transfer-restored

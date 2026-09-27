@@ -232,6 +232,17 @@ export default function CyberShell({ section, username }: { section: Page; usern
       if (response.status === 422) {
         throw new Error('TikTok ไม่ยืนยัน session นี้ กรุณาคัดลอก cURL ใหม่จากบัญชีที่เข้าสู่ระบบ');
       }
+      if (response.status === 400) {
+        throw new Error(
+          'รูปแบบ cURL ไม่ถูกต้อง กรุณาคัดลอก Copy as cURL (bash) จาก DevTools โดยตรง',
+        );
+      }
+      if (response.status === 503) {
+        throw new Error('ระบบบัญชียังไม่พร้อม กรุณาลองอีกครั้งเมื่อบริการกลับมาทำงาน');
+      }
+      if (response.status === 401) {
+        throw new Error('กรุณาเข้าสู่ระบบอีกครั้ง');
+      }
       if (!response.ok) throw new Error('บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง');
       const data: unknown = await response.json();
       if (!data || typeof data !== 'object' || !('item' in data)) {

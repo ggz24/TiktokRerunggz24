@@ -103,28 +103,48 @@ function tokenize(input: string): string[] {
   return tokens;
 }
 
-function validateCookieHeader(value: string): void {
+/** Chat apps may turn a URL into a Markdown link; accept it only when both URLs agree. */
+function unwrapMatchingMarkdownLink(value: string): string {
+  const match = /^\[([^[\]()]+)\]\(([^[\]()]+)\)$/.exec(value);
+  if (!match) return value;
+  if (match[1] !== match[2]) invalid('Markdown link label and target differ');
+  return match[1];
+}
+
+function validateCookieHeader(value: string): string {
   if (value.length === 0 || value.length > MAX_COOKIE_LENGTH || /[^\x20-\x7e]/.test(value)) {
     invalid('cookie header is invalid');
   }
 
   let hasSession = false;
+  const normalizedPieces: string[] = [];
   for (const piece of value.split(';')) {
     const part = piece.trim();
     const equalIndex = part.indexOf('=');
-    if (equalIndex < 1 || !/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(part.slice(0, equalIndex))) {
+    if (equalIndex < 1) invalid('cookie header is invalid');
+    const rawName = part.slice(0, equalIndex);
+    // A copied Markdown cURL may escape underscores in cookie names. Values stay byte-for-byte.
+    const normalizedName = rawName.replace(/\\_/g, '_');
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(normalizedName)) {
       invalid('cookie header is invalid');
     }
-    const name = part.slice(0, equalIndex).toLowerCase();
+    if (/\\_/.test(part.slice(equalIndex + 1))) {
+      invalid('cookie value appears Markdown-escaped; paste the original cURL');
+    }
+    const name = normalizedName.toLowerCase();
     if (['sessionid', 'sessionid_ss', 'sid_tt'].includes(name) && part.slice(equalIndex + 1)) {
       hasSession = true;
     }
+    normalizedPieces.push(piece.replace(rawName, normalizedName));
   }
   if (!hasSession) invalid('session cookie is missing');
+  return normalizedPieces.join(';');
 }
 
 function claimedHandleFromReferer(value: string): string {
-  const match = /^https:\/\/www\.tiktok\.com\/@([A-Za-z0-9._]{1,32})\/?$/.exec(value);
+  const match = /^https:\/\/www\.tiktok\.com\/@([A-Za-z0-9._]{1,32})\/?$/.exec(
+    unwrapMatchingMarkdownLink(value),
+  );
   if (!match) invalid('referer is invalid');
   return match[1];
 }
@@ -214,10 +234,11 @@ export function parseAccountImportCurl(input: string): ParsedAccountImportCurl {
     }
   }
 
-  if (url !== PROFILE_URL) invalid('URL must be the TikTok profile endpoint');
+  if (url === undefined || unwrapMatchingMarkdownLink(url) !== PROFILE_URL)
+    invalid('URL must be the TikTok profile endpoint');
   if (method !== 'HEAD') invalid('method must be HEAD');
   if (cookieHeader === undefined) invalid('cookie header is missing');
-  validateCookieHeader(cookieHeader);
+  cookieHeader = validateCookieHeader(cookieHeader);
 
   return {
     method: 'HEAD',
