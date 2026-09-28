@@ -9,8 +9,9 @@ Clone repo `https://github.com/notza0816581058/Tiktok-rerun` และเลื�
 ## สถานะงาน
 
 - UI มี Dashboard, Accounts, Live Session, Video Library, Playlist, Product Set, Comment + AI, Analytics, Logs และ Settings หน้าที่นอกเหนือจากการนำเข้าบัญชียังใช้ข้อมูลจำลอง
-- Accounts รับ cURL ที่เจ้าของบัญชีคัดลอกจาก DevTools ตรวจตัวตนผ่านคำขออ่านข้อมูลบัญชีของ TikTok แล้วเก็บ cookie และ User-Agent แบบเข้ารหัสใน PostgreSQL ไม่บันทึกค่าจริงใน Git
-- ตาราง `livehub_account_imports` เป็นพื้นที่เก็บชั่วคราวก่อนรวมกับ Prisma schema ของโอ๊ต บัญชีที่มีอยู่ในชุดสำรองต้องใช้ `.env` จากชุดเดียวกันเพื่อถอดรหัส
+- Accounts รับ cURL หรือ `sessionid` จากเจ้าของบัญชี ตรวจตัวตนผ่านคำขออ่านข้อมูลบัญชีของ TikTok แล้วเก็บ cookie และ User-Agent แบบเข้ารหัสใน PostgreSQL ไม่บันทึกค่าจริงแบบข้อความใน Git
+- Live Session รับ MP4 และมีทางเลือกทดลองสร้างห้อง/ดึงปลายทางผ่าน RapidAPI signer; ยังต้องยืนยันผลห้องจริงและภาพที่ผู้ชมเห็น
+- ตาราง `livehub_account_imports` เป็นพื้นที่เก็บชั่วคราวก่อนรวมกับ Prisma schema v2 ที่ทีม merge แล้ว บัญชีที่มีอยู่ในชุดสำรองต้องใช้ `.env` จากชุดเดียวกันเพื่อถอดรหัส
 - งานซีด้าน Stats/Product และงานภูมิด้าน Comments/Chat ยังต้องยืนยัน contract และเชื่อม endpoint จริง งาน client ของน็อตส่วน Live/Product/Chat ยังเป็น mock
 
 เอกสารทีมอยู่ใน `docs/` รวมถึง [รายการแก้ Day 03](reference/Nott_Day03_Fix_List.md) และ [ขอบเขตโครงการ](reference/project_scope_tiktok_live_manager.md)

@@ -88,7 +88,7 @@ npm run dev
 
 ## งานที่รอทีม
 
-- **โอ๊ต P0-3:** นำ Schema v2 ที่ผ่าน review เข้า Prisma, รัน migration กับ Dev DB และส่งผลการตรวจ index/relation/constraint ฐาน PostgreSQL ใน Compose พร้อมแล้ว แต่ยังไม่มี migration จริง
+- **โอ๊ต P0-3:** Schema v2 และไฟล์ migration รวมใน `main` แล้ว ขั้นต่อไปคือรัน migration กับ Dev DB ที่เตรียมไว้และส่งผลตรวจ index/relation/constraint ก่อนเชื่อมตารางบัญชีชั่วคราวเข้ากับ Prisma
 - **ซีและภูมิ P0-5:** ยืนยัน Integration/Comment/Chat contracts และปรับ proposed request/response กับ event mapping ให้ตรงหลักฐานที่ตรวจแล้ว
 - **น็อต P0-6 ขั้นถัดไป:** เสียบ verified transport หลังได้รับ endpoint และบัญชีทดสอบที่อนุมัติ; เพิ่ม unit/integration tests โดยไม่เปิดคำสั่งที่เปลี่ยนข้อมูลจริงก่อนพร้อม
 
