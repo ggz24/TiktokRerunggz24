@@ -11,6 +11,8 @@ apps/*/dist
 packages/*/dist
 work
 *.log
+*.tsbuildinfo
+media/
 transfer/*.key
 transfer/*.tar
 transfer/*.dump

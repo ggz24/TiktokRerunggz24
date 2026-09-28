@@ -73,8 +73,10 @@ export async function POST(request: Request) {
     !body ||
     typeof body !== 'object' ||
     typeof (body as { alias?: unknown }).alias !== 'string' ||
-    typeof (body as { curl?: unknown }).curl !== 'string' ||
-    (body as { curl: string }).curl.length > 100_000
+    (typeof (body as { curl?: unknown }).curl === 'string') ===
+      (typeof (body as { sessionid?: unknown }).sessionid === 'string') ||
+    (typeof (body as { curl?: unknown }).curl === 'string' &&
+      (body as { curl: string }).curl.length > 100_000)
   ) {
     return NextResponse.json({ error: 'ข้อมูลบัญชีไม่ถูกต้อง' }, { status: 400, headers: noStore });
   }
@@ -88,13 +90,13 @@ export async function POST(request: Request) {
     });
     if (response.status === 400) {
       return NextResponse.json(
-        { error: 'cURL ไม่ถูกต้อง กรุณาคัดลอกต้นฉบับจาก DevTools อีกครั้ง' },
+        { error: 'ข้อมูล session ไม่ถูกต้อง กรุณาตรวจ cURL หรือ sessionid อีกครั้ง' },
         { status: 400, headers: noStore },
       );
     }
     if (response.status === 422) {
       return NextResponse.json(
-        { error: 'TikTok ไม่ยืนยัน session นี้ กรุณาคัดลอก cURL ใหม่จากบัญชีที่เข้าสู่ระบบ' },
+        { error: 'TikTok ไม่ยืนยัน session นี้ กรุณาใช้ session ที่เข้าสู่ระบบอยู่' },
         { status: 422, headers: noStore },
       );
     }

@@ -9,6 +9,7 @@ import type {
 type AccountRow = {
   id: string;
   alias: string;
+  live_title: string;
   claimed_handle: string | null;
   verified_username: string | null;
   avatar_url: string | null;
@@ -20,12 +21,13 @@ type AccountRow = {
 };
 
 const publicColumns =
-  'id, alias, claimed_handle, verified_username, avatar_url, verified_at, verification_status, probe, probe_http_status, created_at';
+  'id, alias, live_title, claimed_handle, verified_username, avatar_url, verified_at, verification_status, probe, probe_http_status, created_at';
 
 function metadata(row: AccountRow): AccountMetadata {
   return {
     id: row.id,
     alias: row.alias,
+    liveTitle: row.live_title,
     ...(row.claimed_handle === null ? {} : { claimedHandle: row.claimed_handle }),
     ...(row.verified_username === null ? {} : { verifiedHandle: row.verified_username }),
     ...(row.avatar_url === null ? {} : { avatarUrl: row.avatar_url }),
@@ -44,6 +46,7 @@ export async function ensureAccountTable(pool: Pool): Promise<void> {
       id UUID PRIMARY KEY,
       owner_id VARCHAR(128) NOT NULL,
       alias VARCHAR(80) NOT NULL,
+      live_title VARCHAR(120) NOT NULL DEFAULT '',
       claimed_handle VARCHAR(32),
       verified_username VARCHAR(32),
       verified_user_id VARCHAR(32),
@@ -63,6 +66,7 @@ export async function ensureAccountTable(pool: Pool): Promise<void> {
   `);
   await pool.query(`
     ALTER TABLE livehub_account_imports
+      ADD COLUMN IF NOT EXISTS live_title VARCHAR(120) NOT NULL DEFAULT '',
       ADD COLUMN IF NOT EXISTS verified_username VARCHAR(32),
       ADD COLUMN IF NOT EXISTS verified_user_id VARCHAR(32),
       ADD COLUMN IF NOT EXISTS avatar_url TEXT,
@@ -107,16 +111,17 @@ export function createPgAccountStore(pool: Pool): AccountStore {
     async insert(account: StoredAccount) {
       const result = await pool.query<AccountRow>(
         `INSERT INTO livehub_account_imports
-         (id, owner_id, alias, claimed_handle, verified_username, verified_user_id,
+         (id, owner_id, alias, live_title, claimed_handle, verified_username, verified_user_id,
           avatar_url, verified_at, verification_status, probe, probe_http_status,
           cookie_ciphertext, cookie_iv, cookie_tag,
           user_agent_ciphertext, user_agent_iv, user_agent_tag, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
          RETURNING ${publicColumns}`,
         [
           account.id,
           account.ownerId,
           account.alias,
+          account.liveTitle,
           account.claimedHandle ?? null,
           account.verifiedHandle ?? null,
           account.verifiedUserId ?? null,
@@ -135,6 +140,23 @@ export function createPgAccountStore(pool: Pool): AccountStore {
         ],
       );
       return metadata(result.rows[0]);
+    },
+    async updateSettings(ownerId, id, settings) {
+      const result = await pool.query<AccountRow>(
+        `UPDATE livehub_account_imports
+         SET alias = $3, live_title = $4
+         WHERE owner_id = $1 AND id = $2
+         RETURNING ${publicColumns}`,
+        [ownerId, id, settings.alias, settings.liveTitle],
+      );
+      return result.rows[0] ? metadata(result.rows[0]) : null;
+    },
+    async delete(ownerId, id) {
+      const result = await pool.query<{ id: string }>(
+        'DELETE FROM livehub_account_imports WHERE owner_id = $1 AND id = $2 RETURNING id',
+        [ownerId, id],
+      );
+      return result.rows.length > 0;
     },
     async findEncrypted(ownerId, id) {
       const result = await pool.query<

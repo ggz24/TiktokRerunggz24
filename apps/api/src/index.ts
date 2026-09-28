@@ -3,6 +3,9 @@ import { createClient } from 'redis';
 import { createApp } from './app.js';
 import { createPgAccountStore, ensureAccountTable } from './account-store.js';
 import { parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
+import { createPgLiveStore, ensureLiveTables } from './live-store.js';
+import { LiveService } from './live-service.js';
+import { createRapidApiRoomSigner, createTikTokLiveRoom } from '@live-hub/tiktok-client';
 
 const port = Number(process.env.API_PORT ?? 4000);
 const databaseUrl =
@@ -28,7 +31,47 @@ const accountConfig: AccountConfig | undefined =
         internalToken,
       }
     : undefined;
-if (accountConfig) await ensureAccountTable(pool);
+let liveService: LiveService | undefined;
+if (accountConfig) {
+  await ensureAccountTable(pool);
+  await ensureLiveTables(pool);
+  const rapidApiKey = process.env.RAPIDAPI_KEY?.trim();
+  const autoRoomCreator = rapidApiKey
+    ? async ({
+        title,
+        cookieHeader,
+        userAgent,
+      }: {
+        title: string;
+        cookieHeader: string;
+        userAgent?: string;
+      }) => {
+        const room = await createTikTokLiveRoom(
+          {
+            title,
+            cookieHeader,
+            categoryId: process.env.TIKTOK_LIVE_CATEGORY_ID ?? '0',
+            studioVersion: process.env.TIKTOK_STUDIO_VERSION ?? '1.36.6',
+            deviceId: process.env.TIKTOK_STUDIO_DEVICE_ID ?? '0',
+            installId: process.env.TIKTOK_STUDIO_INSTALL_ID ?? '0',
+            ...(userAgent ? { userAgent } : {}),
+          },
+          createRapidApiRoomSigner(rapidApiKey),
+        );
+        return room;
+      }
+    : undefined;
+  liveService = new LiveService(
+    createPgLiveStore(pool),
+    accountConfig.store,
+    accountConfig.encryptionKey,
+    process.env.LIVE_MEDIA_DIR ?? './media',
+    undefined,
+    undefined,
+    undefined,
+    autoRoomCreator,
+  );
+}
 
 const app = createApp(
   {
@@ -45,6 +88,7 @@ const app = createApp(
     },
   },
   accountConfig,
+  liveService,
 );
 
 async function shutdown() {

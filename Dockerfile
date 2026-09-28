@@ -17,6 +17,7 @@ EXPOSE 3100
 CMD ["npm", "run", "start:web"]
 
 FROM source AS api
+RUN apk add --no-cache ffmpeg
 RUN npm run build:shared && npm run build:client && npm run build:api
 EXPOSE 4000
 CMD ["npm", "run", "start:api"]

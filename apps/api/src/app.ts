@@ -9,11 +9,14 @@ import {
   newAccountId,
   tokenMatches,
   validAlias,
+  validLiveTitle,
   validOwnerId,
   validateAccountConfig,
   type AccountConfig,
   type StoredAccount,
 } from './accounts.js';
+import { registerLiveRoutes } from './live-routes.js';
+import type { LiveService } from './live-service.js';
 
 const require = createRequire(import.meta.url);
 const { createMockEvent, validateEvent } =
@@ -33,7 +36,11 @@ export type HealthDependencies = {
   worker: () => Promise<boolean>;
 };
 
-export function createApp(deps: HealthDependencies, accountConfig?: AccountConfig) {
+export function createApp(
+  deps: HealthDependencies,
+  accountConfig?: AccountConfig,
+  liveService?: LiveService,
+) {
   if (accountConfig) validateAccountConfig(accountConfig);
   const app = Fastify({ logger: false });
 
@@ -48,6 +55,10 @@ export function createApp(deps: HealthDependencies, accountConfig?: AccountConfi
       return null;
     }
     return owner as string;
+  }
+
+  function validAccountId(id: string | undefined): id is string {
+    return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
   }
 
   app.get('/health/live', async () => ({ status: 'alive', service: 'api' }));
@@ -130,25 +141,37 @@ export function createApp(deps: HealthDependencies, accountConfig?: AccountConfi
       typeof body !== 'object' ||
       body === null ||
       Array.isArray(body) ||
-      Object.keys(body).some((key) => !['alias', 'curl'].includes(key))
+      Object.keys(body).some((key) => !['alias', 'curl', 'sessionid', 'liveTitle'].includes(key))
     ) {
       return reply.status(400).send({ error: 'Invalid account import request.' });
     }
     const values = body as Record<string, unknown>;
     if (
       !validAlias(values.alias) ||
-      typeof values.curl !== 'string' ||
-      values.curl.length === 0 ||
-      values.curl.length > 64_000
+      (values.liveTitle !== undefined && !validLiveTitle(values.liveTitle)) ||
+      (typeof values.curl === 'string') === (typeof values.sessionid === 'string')
     ) {
       return reply.status(400).send({ error: 'Invalid account import request.' });
     }
 
-    let parsed: ReturnType<typeof parseAccountImportCurl>;
-    try {
-      parsed = parseAccountImportCurl(values.curl);
-    } catch {
-      return reply.status(400).send({ error: 'Invalid account import cURL.' });
+    let parsed: Pick<
+      ReturnType<typeof parseAccountImportCurl>,
+      'cookieHeader' | 'userAgent' | 'claimedHandle'
+    >;
+    if (typeof values.sessionid === 'string') {
+      if (!/^[A-Za-z0-9._~%-]{16,512}$/.test(values.sessionid)) {
+        return reply.status(400).send({ error: 'Invalid TikTok session ID.' });
+      }
+      parsed = { cookieHeader: `sessionid=${values.sessionid}` };
+    } else {
+      if (typeof values.curl !== 'string' || !values.curl || values.curl.length > 64_000) {
+        return reply.status(400).send({ error: 'Invalid account import cURL.' });
+      }
+      try {
+        parsed = parseAccountImportCurl(values.curl);
+      } catch {
+        return reply.status(400).send({ error: 'Invalid account import cURL.' });
+      }
     }
 
     let identity;
@@ -167,6 +190,7 @@ export function createApp(deps: HealthDependencies, accountConfig?: AccountConfi
       id,
       ownerId,
       alias: values.alias.trim(),
+      liveTitle: typeof values.liveTitle === 'string' ? values.liveTitle.trim() : '',
       ...(parsed.claimedHandle === undefined ? {} : { claimedHandle: parsed.claimedHandle }),
       verifiedHandle: identity.username,
       verifiedUserId: identity.userId,
@@ -196,12 +220,70 @@ export function createApp(deps: HealthDependencies, accountConfig?: AccountConfi
     }
   });
 
+  app.patch('/api/v1/accounts/:id', async (request, reply) => {
+    if (!accountConfig)
+      return reply.status(503).send({ error: 'Account settings are unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { id } = request.params as { id?: string };
+    if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid account ID.' });
+    const body = request.body;
+    if (
+      typeof body !== 'object' ||
+      body === null ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 2 ||
+      Object.keys(body).some((key) => !['alias', 'liveTitle'].includes(key))
+    ) {
+      return reply.status(400).send({ error: 'Invalid account settings.' });
+    }
+    const values = body as Record<string, unknown>;
+    if (!validAlias(values.alias) || !validLiveTitle(values.liveTitle)) {
+      return reply.status(400).send({ error: 'Invalid account settings.' });
+    }
+    try {
+      const item = await accountConfig.store.updateSettings(ownerId, id, {
+        alias: values.alias.trim(),
+        liveTitle: values.liveTitle.trim(),
+      });
+      if (!item) return reply.status(404).send({ error: 'Account not found.' });
+      return { item };
+    } catch {
+      return reply.status(503).send({ error: 'Account storage is unavailable.' });
+    }
+  });
+
+  app.delete('/api/v1/accounts/:id', async (request, reply) => {
+    if (!accountConfig)
+      return reply.status(503).send({ error: 'Account deletion is unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { id } = request.params as { id?: string };
+    if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid account ID.' });
+    const releaseDeletion = liveService?.beginAccountDeletion(ownerId, id);
+    if (liveService && !releaseDeletion) {
+      return reply
+        .status(409)
+        .send({ error: 'Stop the live stream before deleting this account.' });
+    }
+    try {
+      if (!(await accountConfig.store.delete(ownerId, id))) {
+        return reply.status(404).send({ error: 'Account not found.' });
+      }
+      return reply.status(204).send();
+    } catch {
+      return reply.status(503).send({ error: 'Account storage is unavailable.' });
+    } finally {
+      releaseDeletion?.();
+    }
+  });
+
   app.post('/api/v1/accounts/:id/verify', async (request, reply) => {
     if (!accountConfig) return reply.status(503).send({ error: 'Account checks are unavailable.' });
     const ownerId = ownerFromHeaders(request.headers);
     if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
     const { id } = request.params as { id?: string };
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    if (!validAccountId(id)) {
       return reply.status(400).send({ error: 'Invalid account ID.' });
     }
     try {
@@ -227,6 +309,8 @@ export function createApp(deps: HealthDependencies, accountConfig?: AccountConfi
       return reply.status(503).send({ error: 'TikTok account check is unavailable.' });
     }
   });
+
+  if (liveService) registerLiveRoutes(app, liveService, ownerFromHeaders);
 
   return app;
 }

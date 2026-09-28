@@ -18,10 +18,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' }, { status: 401 });
   }
   const response = NextResponse.json({ ok: true });
+  const hostname = new URL(request.url).hostname;
   response.cookies.set(cookieName, makeSession(username), {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure:
+      process.env.NODE_ENV === 'production' && hostname !== 'localhost' && hostname !== '127.0.0.1',
     path: '/',
     maxAge: 86400,
   });

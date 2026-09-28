@@ -70,6 +70,7 @@ function metadata(row: StoredAccount): AccountMetadata {
   return {
     id: row.id,
     alias: row.alias,
+    liveTitle: row.liveTitle,
     ...(row.claimedHandle === undefined ? {} : { claimedHandle: row.claimedHandle }),
     ...(row.verifiedHandle === undefined ? {} : { verifiedHandle: row.verifiedHandle }),
     ...(row.avatarUrl === undefined ? {} : { avatarUrl: row.avatarUrl }),
@@ -93,6 +94,23 @@ function accountFixture(identityLookup: IdentityLookup) {
       insert: async (row: StoredAccount) => {
         rows.push(row);
         return metadata(row);
+      },
+      updateSettings: async (
+        ownerId: string,
+        id: string,
+        settings: { alias: string; liveTitle: string },
+      ) => {
+        const row = rows.find((item) => item.ownerId === ownerId && item.id === id);
+        if (!row) return null;
+        row.alias = settings.alias;
+        row.liveTitle = settings.liveTitle;
+        return metadata(row);
+      },
+      delete: async (ownerId: string, id: string) => {
+        const index = rows.findIndex((item) => item.ownerId === ownerId && item.id === id);
+        if (index < 0) return false;
+        rows.splice(index, 1);
+        return true;
       },
       findEncrypted: async (ownerId: string, id: string) => {
         const row = rows.find((item) => item.ownerId === ownerId && item.id === id);
@@ -201,6 +219,7 @@ test('authenticated identity connects the account and stores only encrypted cook
   assert.deepEqual(response.json().item, {
     id: fixture.rows[0].id,
     alias: 'Sample Account',
+    liveTitle: '',
     claimedHandle: 'sample.user',
     verifiedHandle: 'sample.user',
     avatarUrl: 'https://cdn.example/avatar',
@@ -243,6 +262,39 @@ test('authenticated identity connects the account and stores only encrypted cook
     },
   });
   assert.deepEqual(otherOwner.json(), { items: [] });
+  await app.close();
+});
+
+test('imports a sessionid and live title without retaining plaintext in the response', async () => {
+  const sessionid = '1234567890abcdef1234567890abcdef';
+  const fixture = accountFixture(async (cookieHeader) => {
+    assert.equal(cookieHeader, `sessionid=${sessionid}`);
+    return { userId: '1234567890123456789', username: 'sample.user' };
+  });
+  const app = createApp(
+    { postgres: async () => {}, redis: async () => {}, worker: async () => true },
+    fixture.config,
+  );
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
+    payload: { alias: 'Jake style', sessionid, liveTitle: 'Live from MP4' },
+  });
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.json().item.liveTitle, 'Live from MP4');
+  assert.equal(response.body.includes(sessionid), false);
+  assert.equal(
+    decryptAccountCookie(fixture.rows[0], fixture.key, 'owner-1', fixture.rows[0].id),
+    `sessionid=${sessionid}`,
+  );
+  const invalid = await app.inject({
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
+    payload: { alias: 'Bad', sessionid: 'short' },
+  });
+  assert.equal(invalid.statusCode, 400);
   await app.close();
 });
 
@@ -326,6 +378,132 @@ test('recheck uses the encrypted cookie and original User-Agent, then clears sta
   assert.equal(result.json().item.avatarUrl, undefined);
   assert.equal(result.json().item.verifiedAt, undefined);
   assert.equal(result.body.includes('fake-session-only'), false);
+  await app.close();
+});
+
+test('account settings update is validated and scoped to the owner', async () => {
+  const fixture = accountFixture(async () => ({
+    userId: '1234567890123456789',
+    username: 'sample.user',
+  }));
+  const app = createApp(
+    { postgres: async () => {}, redis: async () => {}, worker: async () => true },
+    fixture.config,
+  );
+  const imported = await app.inject({
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
+    payload: { alias: 'Sample', curl: syntheticCurl },
+  });
+  const id = imported.json().item.id as string;
+  const url = `/api/v1/accounts/${id}`;
+  const originalCiphertext = Buffer.from(fixture.rows[0].ciphertext);
+  const originalIv = Buffer.from(fixture.rows[0].iv);
+
+  assert.equal(
+    (
+      await app.inject({
+        method: 'PATCH',
+        url,
+        payload: { alias: 'Updated', liveTitle: 'Session' },
+      })
+    ).statusCode,
+    401,
+  );
+  assert.equal(
+    (
+      await app.inject({
+        method: 'PATCH',
+        url,
+        headers: { ...headers, 'x-livehub-owner': 'owner-2' },
+        payload: { alias: 'Updated', liveTitle: 'Session' },
+      })
+    ).statusCode,
+    404,
+  );
+  for (const payload of [
+    { alias: '', liveTitle: 'Session' },
+    { alias: 'Updated' },
+    { alias: 'Updated', liveTitle: 'x'.repeat(121) },
+    { alias: 'Updated', liveTitle: 'bad\nvalue' },
+    { alias: 'Updated', liveTitle: '', unexpected: true },
+  ]) {
+    assert.equal((await app.inject({ method: 'PATCH', url, headers, payload })).statusCode, 400);
+  }
+  assert.equal(fixture.rows[0].alias, 'Sample');
+  assert.equal(fixture.rows[0].liveTitle, '');
+
+  const result = await app.inject({
+    method: 'PATCH',
+    url,
+    headers,
+    payload: { alias: '  Updated  ', liveTitle: '  Evening live  ' },
+  });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.json().item.alias, 'Updated');
+  assert.equal(result.json().item.liveTitle, 'Evening live');
+  assert.equal(result.body.includes('fake-session-only'), false);
+  assert.deepEqual(fixture.rows[0].ciphertext, originalCiphertext);
+  assert.deepEqual(fixture.rows[0].iv, originalIv);
+  const cleared = await app.inject({
+    method: 'PATCH',
+    url,
+    headers,
+    payload: { alias: 'Updated', liveTitle: '' },
+  });
+  assert.equal(cleared.statusCode, 200);
+  assert.equal(cleared.json().item.liveTitle, '');
+  await app.close();
+});
+
+test('deleting an account removes its encrypted session only for the owner', async () => {
+  const fixture = accountFixture(async () => ({
+    userId: '1234567890123456789',
+    username: 'sample.user',
+  }));
+  const app = createApp(
+    { postgres: async () => {}, redis: async () => {}, worker: async () => true },
+    fixture.config,
+  );
+  const imported = await app.inject({
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
+    payload: { alias: 'Sample', curl: syntheticCurl },
+  });
+  const id = imported.json().item.id as string;
+  const url = `/api/v1/accounts/${id}`;
+
+  assert.equal((await app.inject({ method: 'DELETE', url })).statusCode, 401);
+  assert.equal(
+    (
+      await app.inject({
+        method: 'DELETE',
+        url,
+        headers: { ...headers, 'x-livehub-owner': 'owner-2' },
+      })
+    ).statusCode,
+    404,
+  );
+  assert.equal(
+    (await app.inject({ method: 'DELETE', url: '/api/v1/accounts/bad', headers })).statusCode,
+    400,
+  );
+  assert.equal(fixture.rows.length, 1);
+
+  const deleted = await app.inject({ method: 'DELETE', url, headers });
+  assert.equal(deleted.statusCode, 204);
+  assert.equal(deleted.body, '');
+  assert.equal(fixture.rows.length, 0);
+  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/v1/accounts', headers })).json(), {
+    items: [],
+  });
+  assert.equal((await app.inject({ method: 'DELETE', url, headers })).statusCode, 404);
+  assert.equal(
+    (await app.inject({ method: 'POST', url: `${url}/verify`, headers })).statusCode,
+    404,
+  );
   await app.close();
 });
 

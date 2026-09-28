@@ -5,6 +5,15 @@ export { parseSanitizedCurl, substituteRequestTemplate } from './request-templat
 export { parseAccountImportCurl } from './account-curl';
 export type { ParsedAccountImportCurl } from './account-curl';
 export { parseProxyConfig } from './proxy';
+export { createTikTokLiveRoom, parseCreatedRoom } from './live-room';
+export { createRapidApiRoomSigner } from './rapidapi-signer';
+export type {
+  CreateRoomInput,
+  CreatedRoom,
+  RoomSignature,
+  RoomSignInput,
+  RoomSigner,
+} from './live-room';
 export { nextRetryDelayMs } from './retry';
 export { redactRequestForLog } from './redaction';
 export type {

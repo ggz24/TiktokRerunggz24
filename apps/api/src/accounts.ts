@@ -19,6 +19,7 @@ export interface TikTokIdentity {
 export interface AccountMetadata {
   id: string;
   alias: string;
+  liveTitle: string;
   claimedHandle?: string;
   verifiedHandle?: string;
   avatarUrl?: string;
@@ -51,6 +52,12 @@ export interface EncryptedAccountSecret extends EncryptedCookie {
 export interface AccountStore {
   list(ownerId: string): Promise<AccountMetadata[]>;
   insert(account: StoredAccount): Promise<AccountMetadata>;
+  updateSettings(
+    ownerId: string,
+    id: string,
+    settings: { alias: string; liveTitle: string },
+  ): Promise<AccountMetadata | null>;
+  delete(ownerId: string, id: string): Promise<boolean>;
   findEncrypted(ownerId: string, id: string): Promise<EncryptedAccountSecret | null>;
   setVerification(
     ownerId: string,
@@ -104,6 +111,14 @@ export function validAlias(input: unknown): input is string {
   if (typeof input !== 'string' || input.trim().length < 1 || input.trim().length > 80) {
     return false;
   }
+  return !Array.from(input).some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
+}
+
+export function validLiveTitle(input: unknown): input is string {
+  if (typeof input !== 'string' || input.trim().length > 120) return false;
   return !Array.from(input).some((character) => {
     const code = character.charCodeAt(0);
     return code < 32 || code === 127;
