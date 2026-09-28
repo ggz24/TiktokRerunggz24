@@ -1,0 +1,427 @@
+// ============================================================================
+// LIVE Automation Platform - Prisma Schema v2
+// Target: PostgreSQL 15+
+// Author: Oat (Platform / UI / Database)
+// Note: Reviewed schema v2 managed by the API workspace migration.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// ENUMS
+// ----------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum LicensePlan {
+  TRIAL
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+enum LicenseStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum AuthType {
+  COOKIE
+  OAUTH
+  HYBRID
+}
+
+enum AccountStatus {
+  CONNECTED
+  EXPIRED
+  DISCONNECTED
+  INVALID_CREDENTIALS
+}
+
+enum VideoStatus {
+  UPLOADING
+  READY
+  PROCESSING
+  ERROR
+}
+
+enum PlaylistLoopMode {
+  LOOP
+  SEQUENTIAL
+  SHUFFLE
+  ONCE
+}
+
+enum CommonStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum LiveSessionMode {
+  RERUN
+  PLAYLIST
+  SCHEDULED
+  MANUAL
+}
+
+enum LiveSessionStatus {
+  DRAFT
+  SCHEDULED
+  STARTING
+  LIVE
+  STOPPED
+  COMPLETED
+  ERROR
+}
+
+enum TriggerType {
+  KEYWORD
+  REGEX
+  INTENT
+  EXACT
+}
+
+enum AiProvider {
+  OPENAI
+  ANTHROPIC
+  GEMINI
+  LOCAL
+  CUSTOM
+}
+
+enum ReplyStatus {
+  PENDING
+  REPLIED
+  IGNORED
+  FAILED
+}
+
+enum AiLogStatus {
+  SUCCESS
+  FAILED
+  TIMEOUT
+}
+
+// ----------------------------------------------------------------------------
+// MODELS
+// ----------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String     @unique @db.VarChar(255)
+  passwordHash String     @map("password_hash") @db.Text
+  displayName  String?    @map("display_name") @db.VarChar(120)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  licenses License[]
+  accounts Account[]
+
+  @@map("users")
+}
+
+model License {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String        @map("user_id") @db.Uuid
+  licenseKey  String        @unique @map("license_key") @db.VarChar(120)
+  plan        LicensePlan   @default(BASIC)
+  status      LicenseStatus @default(ACTIVE)
+  maxAccounts Int           @default(1) @map("max_accounts")
+  expiresAt   DateTime?     @map("expires_at") @db.Timestamptz(6)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, status], map: "idx_licenses_user_status")
+  @@map("licenses")
+}
+
+model Account {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  platform    String   @default("TIKTOK") @db.VarChar(30)
+  accountUid  String   @map("account_uid") @db.VarChar(160)
+  displayName String?  @map("display_name") @db.VarChar(120)
+  avatarUrl   String?  @map("avatar_url") @db.Text
+  authType    AuthType @default(COOKIE) @map("auth_type")
+
+  // Encrypted Credentials for TikTok automation
+  accessTokenEnc       String?   @map("access_token_enc") @db.Text
+  refreshTokenEnc      String?   @map("refresh_token_enc") @db.Text
+  tokenExpiresAt       DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  cookieEnc            String?   @map("cookie_enc") @db.Text
+  cookieExpiresAt      DateTime? @map("cookie_expires_at") @db.Timestamptz(6)
+  encryptionKeyId      String    @default("v1") @map("encryption_key_id") @db.VarChar(64)
+  encryptionIv         String?   @map("encryption_iv") @db.Text
+  credentialsUpdatedAt DateTime? @map("credentials_updated_at") @db.Timestamptz(6)
+  lastVerifiedAt       DateTime? @map("last_verified_at") @db.Timestamptz(6)
+
+  accountMetadata Json          @default("{}") @map("account_metadata")
+  status          AccountStatus @default(CONNECTED)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  settings        AccountSettings?
+  greetingConfigs GreetingConfig[]
+  videos          Video[]
+  playlists       Playlist[]
+  productSets     ProductSet[]
+  liveSessions    LiveSession[]
+  replyRules      ReplyRule[]
+  aiConfigs       AiConfig[]
+
+  @@unique([platform, accountUid], map: "accounts_platform_account_uid_key")
+  @@index([userId, status], map: "idx_accounts_user_status")
+  @@index([platform, status], map: "idx_accounts_platform_status")
+  @@map("accounts")
+}
+
+model GreetingConfig {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  name      String   @db.VarChar(120)
+  message   String   @db.Text
+  delaySec  Int      @default(0) @map("delay_sec")
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account    Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  defaultFor AccountSettings[]
+
+  @@map("greeting_configs")
+}
+
+model AccountSettings {
+  accountId         String   @id @map("account_id") @db.Uuid
+  timezone          String   @default("Asia/Bangkok") @db.VarChar(50)
+  defaultGreetingId String?  @map("default_greeting_id") @db.Uuid
+  aiEnabled         Boolean  @default(false) @map("ai_enabled")
+  statsIntervalSec  Int      @default(30) @map("stats_interval_sec")
+  autoRestart       Boolean  @default(false) @map("auto_restart")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account         Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  defaultGreeting GreetingConfig? @relation(fields: [defaultGreetingId], references: [id], onDelete: SetNull)
+
+  @@map("account_settings")
+}
+
+model Video {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId     String      @map("account_id") @db.Uuid
+  title         String      @db.VarChar(200)
+  fileUrl       String      @map("file_url") @db.Text
+  durationSec   Int?        @map("duration_sec")
+  fileSizeBytes BigInt?     @map("file_size_bytes")
+  resolution    String?     @db.VarChar(20)
+  status        VideoStatus @default(READY)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account       Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  playlistItems PlaylistItem[]
+  liveSessions  LiveSession[]
+
+  @@index([accountId, status], map: "idx_videos_account_status")
+  @@map("videos")
+}
+
+model Playlist {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId String           @map("account_id") @db.Uuid
+  name      String           @db.VarChar(160)
+  loopMode  PlaylistLoopMode @default(LOOP) @map("loop_mode")
+  status    CommonStatus     @default(ACTIVE)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account      Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  items        PlaylistItem[]
+  liveSessions LiveSession[]
+
+  @@index([accountId, status], map: "idx_playlists_account_status")
+  @@map("playlists")
+}
+
+// PlaylistItem extension model
+model PlaylistItem {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  playlistId String   @map("playlist_id") @db.Uuid
+  videoId    String   @map("video_id") @db.Uuid
+  sortOrder  Int      @default(1) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  video    Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, sortOrder], map: "playlist_items_playlist_id_sort_order_key")
+  @@index([playlistId, sortOrder], map: "idx_playlist_items_playlist_order")
+  @@index([videoId], map: "idx_playlist_items_video")
+  @@map("playlist_items")
+}
+
+model ProductSet {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId String       @map("account_id") @db.Uuid
+  name      String       @db.VarChar(160)
+  itemsJson Json         @default("[]") @map("items_json")
+  status    CommonStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  liveSessions LiveSession[]
+
+  @@index([accountId, status], map: "idx_product_sets_account_status")
+  @@map("product_sets")
+}
+
+model LiveSession {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId    String            @map("account_id") @db.Uuid
+  videoId      String?           @map("video_id") @db.Uuid
+  playlistId   String?           @map("playlist_id") @db.Uuid
+  productSetId String?           @map("product_set_id") @db.Uuid
+  title        String            @db.VarChar(200)
+  mode         LiveSessionMode   @default(RERUN)
+  status       LiveSessionStatus @default(DRAFT)
+  scheduledAt  DateTime?         @map("scheduled_at") @db.Timestamptz(6)
+  startedAt    DateTime?         @map("started_at") @db.Timestamptz(6)
+  endedAt      DateTime?         @map("ended_at") @db.Timestamptz(6)
+  errorMessage String?           @map("error_message") @db.Text
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account    Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  video      Video?      @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  playlist   Playlist?   @relation(fields: [playlistId], references: [id], onDelete: SetNull)
+  productSet ProductSet? @relation(fields: [productSetId], references: [id], onDelete: SetNull)
+
+  commentLogs    CommentLog[]
+  statsSnapshots StatsSnapshot[]
+
+  @@index([accountId, status, startedAt], map: "idx_live_sessions_account_status_started")
+  @@index([status, scheduledAt], map: "idx_live_sessions_status_scheduled")
+  @@map("live_sessions")
+}
+
+model ReplyRule {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId    String      @map("account_id") @db.Uuid
+  name         String      @db.VarChar(120)
+  triggerType  TriggerType @map("trigger_type")
+  triggerValue String      @map("trigger_value") @db.Text
+  responseText String      @map("response_text") @db.Text
+  priority     Int         @default(100)
+  enabled      Boolean     @default(true)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  commentLogs CommentLog[]
+
+  @@index([accountId, enabled, priority], map: "idx_reply_rules_account_enabled_priority")
+  @@map("reply_rules")
+}
+
+model AiConfig {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId    String     @map("account_id") @db.Uuid
+  provider     AiProvider
+  model        String     @db.VarChar(120)
+  systemPrompt String?    @map("system_prompt") @db.Text
+  temperature  Decimal?   @default(0.70) @db.Decimal(3, 2)
+  maxTokens    Int?       @default(500) @map("max_tokens")
+  enabled      Boolean    @default(false)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  aiLogs  AiLog[]
+
+  @@index([accountId, enabled], map: "idx_ai_config_account_enabled")
+  @@map("ai_configs")
+}
+
+model CommentLog {
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  liveSessionId     String      @map("live_session_id") @db.Uuid
+  replyRuleId       String?     @map("reply_rule_id") @db.Uuid
+  platformCommentId String      @map("platform_comment_id") @db.VarChar(200)
+  username          String?     @db.VarChar(120)
+  commentText       String      @map("comment_text") @db.Text
+  replyText         String?     @map("reply_text") @db.Text
+  replyStatus       ReplyStatus @default(PENDING) @map("reply_status")
+  commentedAt       DateTime    @map("commented_at") @db.Timestamptz(6)
+  repliedAt         DateTime?   @map("replied_at") @db.Timestamptz(6)
+
+  liveSession LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  replyRule   ReplyRule?  @relation(fields: [replyRuleId], references: [id], onDelete: SetNull)
+  aiLogs      AiLog[]
+
+  @@index([liveSessionId, commentedAt(sort: Desc)], map: "idx_comments_live_time")
+  @@index([replyStatus], map: "idx_comments_status")
+  @@map("comment_logs")
+}
+
+model AiLog {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aiConfigId   String      @map("ai_config_id") @db.Uuid
+  commentLogId String?     @map("comment_log_id") @db.Uuid
+  requestText  String?     @map("request_text") @db.Text
+  responseText String?     @map("response_text") @db.Text
+  model        String?     @db.VarChar(120)
+  status       AiLogStatus @default(SUCCESS)
+  latencyMs    Int?        @map("latency_ms")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  aiConfig   AiConfig    @relation(fields: [aiConfigId], references: [id], onDelete: Restrict)
+  commentLog CommentLog? @relation(fields: [commentLogId], references: [id], onDelete: SetNull)
+
+  @@index([commentLogId, createdAt(sort: Desc)], map: "idx_ai_logs_comment_time")
+  @@index([aiConfigId, createdAt(sort: Desc)], map: "idx_ai_logs_config_time")
+  @@map("ai_logs")
+}
+
+model StatsSnapshot {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  liveSessionId String   @map("live_session_id") @db.Uuid
+  capturedAt    DateTime @default(now()) @map("captured_at") @db.Timestamptz(6)
+
+  // Scope Metrics Required
+  gmv                Decimal @default(0.00) @db.Decimal(18, 2)
+  sold               Int     @default(0)
+  viewers            Int     @default(0)
+  enters             Int     @default(0)
+  impressions        Int     @default(0)
+  gmvPerHour         Decimal @default(0.00) @map("gmv_per_hour") @db.Decimal(18, 2)
+  impressionsPerHour Decimal @default(0.00) @map("impressions_per_hour") @db.Decimal(18, 2)
+
+  // Supplementary Engagement & Sales Metrics
+  likes    Int @default(0)
+  comments Int @default(0)
+  orders   Int @default(0)
+
+  liveSession LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+
+  @@index([liveSessionId, capturedAt(sort: Desc)], map: "idx_stats_live_time")
+  @@map("stats_snapshots")
+}
