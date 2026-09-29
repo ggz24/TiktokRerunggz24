@@ -7,9 +7,9 @@ import { pipeline } from 'node:stream/promises';
 import { decryptAccountCookie, decryptAccountUserAgent, type AccountStore } from './accounts.js';
 import type { EncryptedValue, LiveConfigRow, LiveStore, LiveVideo } from './live-store.js';
 
-export const MAX_VIDEO_BYTES = 512 * 1024 * 1024;
-export const MAX_OWNER_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
-export const MAX_OWNER_VIDEOS = 20;
+export const MAX_VIDEO_BYTES = 8 * 1024 * 1024 * 1024;
+export const MAX_OWNER_VIDEO_BYTES = 40 * 1024 * 1024 * 1024;
+export const MAX_OWNER_VIDEOS = 100;
 
 export class LiveError extends Error {
   constructor(
@@ -26,6 +26,7 @@ export interface LiveSession {
   accountId: string;
   status: LiveStatus;
   hasRtmpConfig: boolean;
+  hasOpenRoom: boolean;
   videoId?: string;
   videoName?: string;
   startedAt?: string;
@@ -36,7 +37,14 @@ export type AutoRoomCreator = (input: {
   title: string;
   cookieHeader: string;
   userAgent?: string;
-}) => Promise<{ roomId: string; rtmpUrl: string; streamKey: string }>;
+}) => Promise<{ roomId: string; streamId: string; rtmpUrl: string; streamKey: string }>;
+
+export type AutoRoomEnder = (input: {
+  cookieHeader: string;
+  userAgent?: string;
+  roomId?: string | null;
+  streamId?: string | null;
+}) => Promise<'ended' | 'no_room'>;
 
 // A destination is only an FFmpeg output target. Resolving one does not prove that
 // a platform room exists or that the stream is visible to viewers.
@@ -236,6 +244,7 @@ export class LiveService {
     private readonly probeVideo: ProbeFn = defaultProbeVideo,
     destinationProvider?: LiveDestinationProvider,
     private readonly autoRoomCreator?: AutoRoomCreator,
+    private readonly autoRoomEnder?: AutoRoomEnder,
   ) {
     if (encryptionKey.length !== 32) throw new Error('Live encryption key must be 32 bytes.');
     this.destinationProvider =
@@ -336,11 +345,15 @@ export class LiveService {
         const config = configured.has(account.id)
           ? await this.store.getConfig(ownerId, account.id)
           : null;
-        const video = config ? await this.store.findVideo(ownerId, config.videoId) : null;
+        const selectedVideoId = await this.store.getPreferredVideoId(ownerId, account.id);
+        const video = selectedVideoId || config
+          ? await this.store.findVideo(ownerId, selectedVideoId ?? config!.videoId)
+          : null;
         return {
           accountId: account.id,
           status: state?.status ?? 'idle',
           hasRtmpConfig: configured.has(account.id),
+          hasOpenRoom: !!config?.roomId,
           ...(video ? { videoId: video.id, videoName: video.name } : {}),
           ...(state?.startedAt ? { startedAt: state.startedAt } : {}),
           ...(state?.error ? { error: state.error } : {}),
@@ -354,15 +367,26 @@ export class LiveService {
     if (!exists) throw new LiveError(404, 'Account not found.');
     const state = this.processes.get(this.processKey(ownerId, accountId));
     const config = await this.store.getConfig(ownerId, accountId);
-    const video = config ? await this.store.findVideo(ownerId, config.videoId) : null;
+    const selectedVideoId = await this.store.getPreferredVideoId(ownerId, accountId);
+    const video = selectedVideoId || config
+      ? await this.store.findVideo(ownerId, selectedVideoId ?? config!.videoId)
+      : null;
     return {
       accountId,
       status: state?.status ?? 'idle',
       hasRtmpConfig: !!config,
+      hasOpenRoom: !!config?.roomId,
       ...(video ? { videoId: video.id, videoName: video.name } : {}),
       ...(state?.startedAt ? { startedAt: state.startedAt } : {}),
       ...(state?.error ? { error: state.error } : {}),
     };
+  }
+
+  async currentRoomId(ownerId: string, accountId: string): Promise<string | null> {
+    if (!(await this.store.accountStatus(ownerId, accountId))) {
+      throw new LiveError(404, 'Account not found.');
+    }
+    return (await this.store.getConfig(ownerId, accountId))?.roomId ?? null;
   }
 
   async configure(
@@ -442,6 +466,12 @@ export class LiveService {
       if (status !== 'connected') throw new LiveError(422, 'Account is not connected.');
       const video = await this.store.findVideo(ownerId, videoId);
       if (!video) throw new LiveError(404, 'Video not found.');
+      const path = mediaPath(this.mediaDir, videoId);
+      const file = await fs.stat(path).catch(() => null);
+      if (!file?.isFile() || file.size !== video.sizeBytes || !(await this.probeVideo(path))) {
+        throw new LiveError(422, 'Select an MP4 with readable video and audio before creating a room.');
+      }
+      await this.store.savePreferredVideoId(ownerId, accountId, videoId);
       const secret = await this.accounts.findEncrypted(ownerId, accountId);
       if (!secret) throw new LiveError(404, 'Account credentials not found.');
       const cookieHeader = decryptAccountCookie(secret, this.encryptionKey, ownerId, accountId);
@@ -460,19 +490,29 @@ export class LiveService {
       if (
         !validRtmpUrl(room.rtmpUrl) ||
         !validStreamKey(room.streamKey) ||
-        !/^\d{8,24}$/.test(room.roomId)
+        !/^\d{8,24}$/.test(room.roomId) || !/^\d{8,24}$/.test(room.streamId)
       ) {
         throw new LiveError(502, 'TikTok returned an invalid LIVE destination.');
       }
-      await this.store.saveConfig(ownerId, accountId, {
-        videoId,
-        rtmpUrl: encrypted(room.rtmpUrl, this.encryptionKey, `${ownerId}\0${accountId}\0rtmp-url`),
-        streamKey: encrypted(
-          room.streamKey,
-          this.encryptionKey,
-          `${ownerId}\0${accountId}\0stream-key`,
-        ),
-      });
+      try {
+        await this.store.saveConfig(ownerId, accountId, {
+          videoId,
+          rtmpUrl: encrypted(room.rtmpUrl, this.encryptionKey, `${ownerId}\0${accountId}\0rtmp-url`),
+          streamKey: encrypted(
+            room.streamKey,
+            this.encryptionKey,
+            `${ownerId}\0${accountId}\0stream-key`,
+          ),
+          roomId: room.roomId,
+          streamId: room.streamId,
+        });
+      } catch {
+        if (this.autoRoomEnder) {
+          await this.autoRoomEnder({ cookieHeader, userAgent, roomId: room.roomId,
+            streamId: room.streamId }).catch(() => 'unverified');
+        }
+        throw new LiveError(503, 'The LIVE room was created but its settings could not be saved. Check TikTok before retrying.');
+      }
       return { session: await this.session(ownerId, accountId), roomId: room.roomId };
     } finally {
       this.configuringAccounts.delete(key);
@@ -496,15 +536,74 @@ export class LiveService {
       const status = await this.store.accountStatus(ownerId, accountId);
       if (!status) throw new LiveError(404, 'Account not found.');
       if (status !== 'connected') throw new LiveError(422, 'Account is not connected.');
-      const config = await this.store.getConfig(ownerId, accountId);
-      if (!config) throw new LiveError(422, 'Save RTMP settings first.');
       const video = await this.store.findVideo(ownerId, videoId);
       if (!video) throw new LiveError(404, 'Video not found.');
-      await this.store.saveConfig(ownerId, accountId, { ...config, videoId });
+      const config = await this.store.getConfig(ownerId, accountId);
+      if (config) await this.store.saveConfig(ownerId, accountId, { ...config, videoId });
+      await this.store.savePreferredVideoId(ownerId, accountId, videoId);
       return this.session(ownerId, accountId);
     } finally {
       this.configuringAccounts.delete(key);
     }
+  }
+
+  async startAuto(ownerId: string, accountId: string, title: unknown): Promise<{ session: LiveSession; roomId: string }> {
+    if (typeof title !== 'string' || !title.trim() || title.trim().length > 120) {
+      throw new LiveError(400, 'Enter a LIVE title before starting.');
+    }
+    if (this.isActive(ownerId, accountId)) throw new LiveError(409, 'Live is already running.');
+    const selectedVideoId = await this.store.getPreferredVideoId(ownerId, accountId);
+    const config = await this.store.getConfig(ownerId, accountId);
+    const videoId = selectedVideoId ?? config?.videoId;
+    if (!videoId) throw new LiveError(422, 'Select a video before starting.');
+    const { roomId } = await this.autoFetchDestination(ownerId, accountId, videoId, title);
+    try {
+      return { session: await this.start(ownerId, accountId), roomId };
+    } catch (error) {
+      // A room may have been created even when the encoder cannot start.
+      await this.finishRoom(ownerId, accountId).catch(() => 'unverified');
+      throw error;
+    }
+  }
+
+  async finishRoom(ownerId: string, accountId: string): Promise<'ended' | 'no_room' | 'unavailable' | 'unverified'> {
+    if (!this.autoRoomEnder) return 'unavailable';
+    const status = await this.store.accountStatus(ownerId, accountId);
+    if (!status) throw new LiveError(404, 'Account not found.');
+    const secret = await this.accounts.findEncrypted(ownerId, accountId);
+    if (!secret) return 'unavailable';
+    const cookieHeader = decryptAccountCookie(secret, this.encryptionKey, ownerId, accountId);
+    const userAgent = secret.userAgent
+      ? decryptAccountUserAgent(secret.userAgent, this.encryptionKey, ownerId, accountId)
+      : undefined;
+    const config = await this.store.getConfig(ownerId, accountId);
+    try {
+      const result = await this.autoRoomEnder({ cookieHeader, userAgent,
+        roomId: config?.roomId, streamId: config?.streamId });
+      if (config && (result === 'ended' || result === 'no_room')) {
+        await this.store.saveConfig(ownerId, accountId, { ...config, roomId: null, streamId: null });
+      }
+      return result;
+    } catch {
+      return 'unverified';
+    }
+  }
+
+  async stopAndEnd(ownerId: string, accountId: string): Promise<{ session: LiveSession; roomEnd: 'ended' | 'no_room' | 'unavailable' | 'unverified' }> {
+    await this.stop(ownerId, accountId);
+    const state = this.processes.get(this.processKey(ownerId, accountId));
+    if (state?.child && state.status === 'stopping' && state.child.exitCode === null) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 5_500);
+        timer.unref();
+        state.child!.once('exit', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+    const roomEnd = await this.finishRoom(ownerId, accountId);
+    return { session: await this.session(ownerId, accountId), roomEnd };
   }
 
   async start(ownerId: string, accountId: string): Promise<LiveSession> {

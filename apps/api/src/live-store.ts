@@ -17,6 +17,8 @@ export interface LiveConfigRow {
   videoId: string;
   rtmpUrl: EncryptedValue;
   streamKey: EncryptedValue;
+  roomId?: string | null;
+  streamId?: string | null;
 }
 
 export interface LiveStore {
@@ -29,6 +31,8 @@ export interface LiveStore {
   listConfiguredAccountIds(ownerId: string): Promise<string[]>;
   getConfig(ownerId: string, accountId: string): Promise<LiveConfigRow | null>;
   saveConfig(ownerId: string, accountId: string, config: LiveConfigRow): Promise<void>;
+  getPreferredVideoId(ownerId: string, accountId: string): Promise<string | null>;
+  savePreferredVideoId(ownerId: string, accountId: string, videoId: string): Promise<void>;
 }
 
 export async function ensureLiveTables(pool: Pool): Promise<void> {
@@ -56,7 +60,21 @@ export async function ensureLiveTables(pool: Pool): Promise<void> {
       stream_key_ciphertext BYTEA NOT NULL,
       stream_key_iv BYTEA NOT NULL,
       stream_key_tag BYTEA NOT NULL,
+      room_id VARCHAR(24),
+      stream_id VARCHAR(24),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    ALTER TABLE livehub_live_configs
+      ADD COLUMN IF NOT EXISTS room_id VARCHAR(24),
+      ADD COLUMN IF NOT EXISTS stream_id VARCHAR(24)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS livehub_live_preferences (
+      account_id UUID PRIMARY KEY REFERENCES livehub_account_imports(id) ON DELETE CASCADE,
+      owner_id VARCHAR(128) NOT NULL,
+      video_id UUID NOT NULL REFERENCES livehub_live_videos(id)
     )
   `);
   await pool.query(`
@@ -164,9 +182,11 @@ export function createPgLiveStore(pool: Pool): LiveStore {
         stream_key_ciphertext: Buffer;
         stream_key_iv: Buffer;
         stream_key_tag: Buffer;
+        room_id: string | null;
+        stream_id: string | null;
       }>(
         `SELECT video_id, rtmp_ciphertext, rtmp_iv, rtmp_tag,
-                stream_key_ciphertext, stream_key_iv, stream_key_tag
+                stream_key_ciphertext, stream_key_iv, stream_key_tag, room_id, stream_id
          FROM livehub_live_configs WHERE owner_id = $1 AND account_id = $2`,
         [ownerId, accountId],
       );
@@ -184,6 +204,8 @@ export function createPgLiveStore(pool: Pool): LiveStore {
               iv: row.stream_key_iv,
               tag: row.stream_key_tag,
             },
+            roomId: row.room_id,
+            streamId: row.stream_id,
           }
         : null;
     },
@@ -191,8 +213,8 @@ export function createPgLiveStore(pool: Pool): LiveStore {
       await pool.query(
         `INSERT INTO livehub_live_configs
           (owner_id, account_id, video_id, rtmp_ciphertext, rtmp_iv, rtmp_tag,
-           stream_key_ciphertext, stream_key_iv, stream_key_tag)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           stream_key_ciphertext, stream_key_iv, stream_key_tag, room_id, stream_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (account_id) DO UPDATE SET
            video_id = EXCLUDED.video_id,
            rtmp_ciphertext = EXCLUDED.rtmp_ciphertext,
@@ -201,6 +223,8 @@ export function createPgLiveStore(pool: Pool): LiveStore {
            stream_key_ciphertext = EXCLUDED.stream_key_ciphertext,
            stream_key_iv = EXCLUDED.stream_key_iv,
            stream_key_tag = EXCLUDED.stream_key_tag,
+           room_id = EXCLUDED.room_id,
+           stream_id = EXCLUDED.stream_id,
            updated_at = NOW()
          WHERE livehub_live_configs.owner_id = EXCLUDED.owner_id`,
         [
@@ -213,7 +237,25 @@ export function createPgLiveStore(pool: Pool): LiveStore {
           config.streamKey.ciphertext,
           config.streamKey.iv,
           config.streamKey.tag,
+          config.roomId ?? null,
+          config.streamId ?? null,
         ],
+      );
+    },
+    async getPreferredVideoId(ownerId, accountId) {
+      const result = await pool.query<{ video_id: string }>(
+        'SELECT video_id FROM livehub_live_preferences WHERE owner_id = $1 AND account_id = $2',
+        [ownerId, accountId],
+      );
+      return result.rows[0]?.video_id ?? null;
+    },
+    async savePreferredVideoId(ownerId, accountId, videoId) {
+      await pool.query(
+        `INSERT INTO livehub_live_preferences (owner_id, account_id, video_id)
+         SELECT a.owner_id, a.id, $3::uuid FROM livehub_account_imports a WHERE a.owner_id = $1 AND a.id = $2
+         ON CONFLICT (account_id) DO UPDATE SET video_id = EXCLUDED.video_id
+         WHERE livehub_live_preferences.owner_id = EXCLUDED.owner_id`,
+        [ownerId, accountId, videoId],
       );
     },
   };

@@ -4,6 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import LiveSessionPanel from './LiveSessionPanel';
+import VideoLibraryPanel from './VideoLibraryPanel';
+import ProductCurlPanel from './ProductCurlPanel';
+import QuickProductSetPanel from './QuickProductSetPanel';
 import {
   CircleCheck,
   LogOut,
@@ -13,6 +16,7 @@ import {
   RefreshCw,
   Settings,
   ShoppingCart,
+  Square,
   Upload,
   X,
 } from 'lucide-react';
@@ -58,13 +62,6 @@ const names: Record<Page, string> = {
   logs: 'บันทึกระบบ',
   settings: 'ตั้งค่าระบบ',
 };
-const sampleVideos = [
-  { name: 'demo-product-01.mp4', size: '32.4 MB', code: '01' },
-  { name: 'demo-loop-02.mp4', size: '48.2 MB', code: '02' },
-  { name: 'demo-promo-03.mp4', size: '21.8 MB', code: '03' },
-  { name: 'demo-intro-04.mp4', size: '16.7 MB', code: '04' },
-];
-
 type SavedAccount = {
   id: string;
   alias: string;
@@ -84,6 +81,7 @@ type StreamSession = {
   accountId: string;
   status: 'idle' | 'starting' | 'live' | 'stopping' | 'failed';
   hasRtmpConfig: boolean;
+  hasOpenRoom: boolean;
   videoId?: string | null;
   videoName?: string | null;
 };
@@ -150,10 +148,6 @@ export default function CyberShell({ section, username }: { section: Page; usern
   const [mobile, setMobile] = useState(false);
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState('');
-  const [tab, setTab] = useState('ตอบอัตโนมัติ');
-  const [search] = useState('');
-  const [autoReply, setAutoReply] = useState(true);
-  const [welcome, setWelcome] = useState(true);
   const [systemStatus, setSystemStatus] = useState<'checking' | 'ready' | 'degraded' | 'offline'>(
     'checking',
   );
@@ -173,16 +167,19 @@ export default function CyberShell({ section, username }: { section: Page; usern
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
   const [accountDeleting, setAccountDeleting] = useState(false);
   const [liveCount, setLiveCount] = useState(0);
+  const [dashboardSessions, setDashboardSessions] = useState<Record<string, StreamSession>>({});
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [streamVideos, setStreamVideos] = useState<StreamVideo[]>([]);
   const [streamSession, setStreamSession] = useState<StreamSession | null>(null);
   const [streamVideoId, setStreamVideoId] = useState('');
   const [streamUrl, setStreamUrl] = useState('');
   const [streamKey, setStreamKey] = useState('');
   const [streamLoading, setStreamLoading] = useState(false);
-  const [streamBusy, setStreamBusy] = useState<'config' | 'video' | ''>('');
+  const [streamBusy, setStreamBusy] = useState<'config' | 'video' | 'auto' | ''>('');
   const [streamSetupError, setStreamSetupError] = useState('');
   const [streamSetupNotice, setStreamSetupNotice] = useState('');
   const [startingAccountId, setStartingAccountId] = useState<string | null>(null);
+  const [stoppingAccountId, setStoppingAccountId] = useState<string | null>(null);
   const [startError, setStartError] = useState<{ accountId: string; message: string } | null>(null);
   const streamLoadGeneration = useRef(0);
   useEffect(() => {
@@ -229,6 +226,28 @@ export default function CyberShell({ section, username }: { section: Page; usern
   useEffect(() => {
     void loadAccounts();
   }, [loadAccounts]);
+  const loadDashboardSessions = useCallback(async () => {
+    try {
+      const response = await fetch('/api/live/sessions', { cache: 'no-store' });
+      if (!response.ok) throw new Error('load failed');
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) {
+        throw new Error('invalid response');
+      }
+      const items = data.items as StreamSession[];
+      setDashboardSessions(Object.fromEntries(items.map((item) => [item.accountId, item])));
+      setLiveCount(items.filter((item) => item.status === 'live').length);
+      setSessionsLoaded(true);
+    } catch {
+      setSessionsLoaded(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (section !== 'dashboard' && section !== 'accounts') return;
+    void loadDashboardSessions();
+    const timer = window.setInterval(() => void loadDashboardSessions(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [section, loadDashboardSessions]);
   const notify = (value: string) => {
     setToast(value);
     window.setTimeout(() => setToast(''), 3500);
@@ -290,23 +309,38 @@ export default function CyberShell({ section, username }: { section: Page; usern
       )
         throw new Error('อ่านการตั้งค่าสตรีมไม่สำเร็จ');
       const session = statusData.item as StreamSession;
-      if (!session.hasRtmpConfig || !session.videoId) {
+      if (session.hasOpenRoom) {
+        setStartError({ accountId: account.id, message: 'ยังมีห้อง LIVE เดิมอยู่ กรุณากดลงไลฟ์เพื่อปิดห้องก่อนเริ่มใหม่' });
+        return;
+      }
+      if (!session.videoId || !account.liveTitle?.trim()) {
         openAccountSettings(account);
-        setStreamSetupNotice('เลือกวิดีโอและบันทึกปลายทางสตรีมก่อนเริ่มครั้งแรก');
+        setStreamSetupNotice('เลือกวิดีโอและตั้งชื่อไลฟ์ แล้วบันทึกการตั้งค่าก่อนเริ่ม');
         return;
       }
       if (session.status === 'starting' || session.status === 'live') {
-        router.push(`/live?accountId=${encodeURIComponent(account.id)}&status=1`);
+        setDashboardSessions((current) => ({ ...current, [account.id]: session }));
+        notify('บัญชีนี้กำลังส่งสัญญาณอยู่แล้ว');
         return;
       }
-      const response = await fetch(`/api/live/sessions/${encodeURIComponent(account.id)}/start`, {
+      const response = await fetch(`/api/live/sessions/${encodeURIComponent(account.id)}/start-auto`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: account.liveTitle.trim() }),
       });
       if (!response.ok) {
         if (response.status === 409) throw new Error('สถานะสตรีมเปลี่ยนไป กรุณาลองอีกครั้ง');
-        throw new Error('เริ่มส่งสัญญาณไม่สำเร็จ กรุณาตรวจปลายทางและวิดีโอ');
+        throw new Error('สร้างห้องหรือเริ่มส่งวิดีโอไม่สำเร็จ กรุณาตรวจบัญชีและบริการดึงคีย์');
       }
-      router.push(`/live?accountId=${encodeURIComponent(account.id)}&status=1`);
+      const started: unknown = await response.json();
+      await loadDashboardSessions();
+      const roomId = started && typeof started === 'object' && 'roomId' in started ? started.roomId : '';
+      notify(`สร้างห้อง LIVE ${roomId || ''} และเริ่มส่งวิดีโอแล้ว`);
+      const productsOutcome = started && typeof started === 'object' && 'productsOutcome' in started
+        ? started.productsOutcome : 'none';
+      if (productsOutcome === 'rejected' || productsOutcome === 'unverified') {
+        setStartError({ accountId: account.id, message: 'ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop' });
+      }
     } catch (error) {
       setStartError({
         accountId: account.id,
@@ -314,6 +348,36 @@ export default function CyberShell({ section, username }: { section: Page; usern
       });
     } finally {
       setStartingAccountId(null);
+    }
+  }
+  async function stopAccountStream(account: SavedAccount) {
+    if (stoppingAccountId) return;
+    if (
+      !window.confirm(
+        'ลงไลฟ์บัญชีนี้? ระบบจะหยุดวิดีโอและสั่งปิดห้องบน TikTok',
+      )
+    )
+      return;
+    setStoppingAccountId(account.id);
+    setStartError(null);
+    try {
+      const response = await fetch(`/api/live/sessions/${encodeURIComponent(account.id)}/stop`, {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('หยุดส่งสัญญาณไม่สำเร็จ กรุณาตรวจสถานะอีกครั้ง');
+      const result: unknown = await response.json();
+      await loadDashboardSessions();
+      const roomEnd = result && typeof result === 'object' && 'roomEnd' in result ? result.roomEnd : '';
+      if (roomEnd === 'ended') notify('หยุดวิดีโอแล้ว TikTok รับคำสั่งปิดห้อง LIVE');
+      else if (roomEnd === 'no_room') notify('หยุดวิดีโอแล้ว ไม่พบห้อง LIVE ที่เปิดอยู่');
+      else setStartError({ accountId: account.id, message: 'หยุดวิดีโอแล้ว แต่ยังยืนยันการปิดห้อง TikTok ไม่ได้ กรุณาตรวจใน TikTok Shop' });
+    } catch (error) {
+      setStartError({
+        accountId: account.id,
+        message: error instanceof Error ? error.message : 'หยุดส่งสัญญาณไม่สำเร็จ',
+      });
+    } finally {
+      setStoppingAccountId(null);
     }
   }
   async function saveStreamConfig() {
@@ -433,6 +497,14 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setSettingsSubmitting(true);
     setAccountFormError('');
     try {
+      if (streamVideoId && streamVideoId !== streamSession?.videoId) {
+        const videoResponse = await fetch(`/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/video`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId: streamVideoId }),
+        });
+        if (!videoResponse.ok) throw new Error('บันทึกวิดีโอที่เลือกไม่สำเร็จ');
+      }
       const response = await fetch(`/api/accounts/${encodeURIComponent(selectedAccount.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -562,6 +634,11 @@ export default function CyberShell({ section, username }: { section: Page; usern
   function savedAccountCard(account: SavedAccount) {
     const connected = account.verificationStatus === 'connected';
     const disconnected = account.verificationStatus === 'disconnected';
+    const session = dashboardSessions[account.id];
+    const active =
+      session?.status === 'live' ||
+      session?.status === 'starting' ||
+      session?.status === 'stopping';
     return (
       <article className="cyber-account-card cyber-saved-card" key={account.id}>
         <div className="cyber-card-head">
@@ -607,6 +684,31 @@ export default function CyberShell({ section, username }: { section: Page; usern
                     ? 'session ไม่ผ่านการตรวจล่าสุด'
                     : 'ตรวจ session อีกครั้งได้'}
               </Badge>
+              <Badge
+                tone={
+                  !sessionsLoaded
+                    ? 'dim'
+                    : session?.status === 'live'
+                      ? 'green'
+                      : session?.status === 'starting' || session?.status === 'stopping'
+                        ? 'yellow'
+                        : session?.status === 'failed'
+                          ? 'pink'
+                          : 'dim'
+                }
+              >
+                {!sessionsLoaded
+                  ? 'ตรวจสถานะไลฟ์ไม่ได้'
+                  : session?.status === 'live'
+                    ? 'กำลัง LIVE'
+                    : session?.status === 'starting'
+                      ? 'กำลังเริ่มไลฟ์'
+                      : session?.status === 'stopping'
+                        ? 'กำลังหยุดไลฟ์'
+                        : session?.status === 'failed'
+                          ? 'ส่งสัญญาณล้มเหลว'
+                          : 'ยังไม่ส่งสัญญาณ'}
+              </Badge>
             </div>
             {connected && account.verifiedAt && (
               <div className="cyber-account-note">
@@ -627,14 +729,25 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <RefreshCw size={13} />{' '}
             {verifyingAccountId === account.id ? 'กำลังตรวจ…' : 'ตรวจการเชื่อมต่อ'}
           </Btn>
-          <Btn
-            tone="green"
-            onClick={() => void startAccountStream(account)}
-            disabled={!connected || startingAccountId !== null}
-          >
-            <Play size={12} fill="currentColor" />{' '}
-            {startingAccountId === account.id ? 'กำลังเริ่ม…' : 'เริ่มส่งสัญญาณ'}
-          </Btn>
+          {active || session?.hasOpenRoom ? (
+            <Btn
+              tone="danger"
+              onClick={() => void stopAccountStream(account)}
+              disabled={stoppingAccountId !== null || session?.status === 'stopping'}
+            >
+              <Square size={12} fill="currentColor" />{' '}
+              {stoppingAccountId === account.id ? 'กำลังลงไลฟ์…' : 'ลงไลฟ์'}
+            </Btn>
+          ) : (
+            <Btn
+              tone="green"
+              onClick={() => void startAccountStream(account)}
+              disabled={!connected || !sessionsLoaded || startingAccountId !== null}
+            >
+              <Play size={12} fill="currentColor" />{' '}
+              {startingAccountId === account.id ? 'กำลังเริ่ม…' : 'เริ่มไลฟ์'}
+            </Btn>
+          )}
           <Btn
             onClick={() =>
               router.push(`/live?accountId=${encodeURIComponent(account.id)}&status=1`)
@@ -642,15 +755,23 @@ export default function CyberShell({ section, username }: { section: Page; usern
           >
             สถานะ
           </Btn>
+          <Btn
+            onClick={() => {
+              setSelectedAccount(account);
+              setModal('เพิ่มสินค้า');
+            }}
+          >
+            <ShoppingCart size={13} /> เพิ่มสินค้า
+          </Btn>
           <Btn onClick={() => openAccountSettings(account)}>
-            <Settings size={13} /> ตั้งค่า
+            <Settings size={13} /> ตั้งค่าไลฟ์
           </Btn>
           <Btn tone="danger" onClick={() => confirmAccountDeletion(account)}>
             ลบ
           </Btn>
           <span className="cyber-account-note">
             {connected
-              ? 'เลือกคลิปและดึงปลายทางอัตโนมัติในหน้า Live Session หรือกรอก RTMP ในตั้งค่าบัญชี'
+              ? 'ตั้งค่าชื่อห้องและวิดีโอจากปุ่มตั้งค่าไลฟ์ · ปุ่มลงไลฟ์จะหยุดวิดีโอและปิดห้อง TikTok'
               : 'กรุณาตรวจการเชื่อมต่อก่อนเข้าไลฟ์'}
           </span>
           {startError?.accountId === account.id && (
@@ -658,60 +779,6 @@ export default function CyberShell({ section, username }: { section: Page; usern
               {startError.message}
             </span>
           )}
-        </div>
-      </article>
-    );
-  }
-  function accountCard(name: string, handle: string, idx: number) {
-    return (
-      <article className="cyber-account-card" key={name}>
-        <div className="cyber-card-head">
-          <span>
-            <i className="cyber-square" /> ข้อมูลตัวอย่าง
-          </span>
-          <span className="cyber-card-head-right">
-            <Badge tone="dim">MOCK ONLY</Badge>
-          </span>
-        </div>
-        <div className="cyber-card-body">
-          <div className={'cyber-avatar avatar-' + idx}>
-            <span>▶</span>
-            <small>DEMO {idx + 1}</small>
-          </div>
-          <div className="cyber-account-info">
-            <div className="cyber-account-name">
-              <span className="cyber-initial">{name.charAt(0)}</span>
-              <strong>{name}</strong>
-            </div>
-            <div className="cyber-handle">{handle}</div>
-            <div className="cyber-chip-row">
-              <Badge tone="cyan">▣ {handle}</Badge>
-              <Badge tone="dim">▥ HD</Badge>
-              <Badge tone="dim">▣ วิดีโอตัวอย่าง</Badge>
-            </div>
-            <div className="cyber-chip-row">
-              <Badge tone="dim">● คอมเมนต์ตัวอย่าง</Badge>
-              <Badge tone="dim">▣ แชทตัวอย่าง</Badge>
-              <Badge tone="dim">▣ AI ตัวอย่าง</Badge>
-              <Badge tone="dim">⚡ MOCK</Badge>
-            </div>
-          </div>
-        </div>
-        <div className="cyber-card-actions">
-          <Btn tone="green" disabled>
-            <Play size={12} fill="currentColor" /> เริ่มไลฟ์
-          </Btn>
-          <Btn disabled>สถานะ</Btn>
-          <Btn disabled>
-            <ShoppingCart size={13} /> เพิ่มสินค้า
-          </Btn>
-          <Btn disabled>
-            <Settings size={13} /> ตั้งค่า
-          </Btn>
-          <Btn disabled>แก้ไข</Btn>
-          <Btn tone="danger" disabled>
-            ลบ
-          </Btn>
         </div>
       </article>
     );
@@ -730,7 +797,6 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <Upload size={13} /> อัปโหลดวิดีโอ
           </Btn>
           <Btn onClick={() => setModal('ภาพรวมทุกบัญชี')}>▣ ภาพรวม</Btn>
-          <Btn onClick={() => setModal('Telegram')}>▣ Telegram</Btn>
         </div>
         <div className="cyber-account-section-head">
           <h2>บัญชีที่เพิ่ม</h2>
@@ -748,187 +814,21 @@ export default function CyberShell({ section, username }: { section: Page; usern
         ) : (
           <p className="cyber-account-empty">ยังไม่มีบัญชีที่เพิ่มด้วย cURL</p>
         )}
-        <div className="cyber-account-section-head cyber-demo-section">
-          <h2>ข้อมูลตัวอย่าง</h2>
-          <span>ใช้ดูหน้าตาเว็บเท่านั้น</span>
-        </div>
-        <div className="cyber-account-grid">
-          {accountCard('Demo Shop A', '@demo_shop_a', 0)}
-          {section === 'accounts' && accountCard('Demo Shop B', '@demo_shop_b', 1)}
-        </div>
-      </>
-    );
-  }
-  function videoView() {
-    return (
-      <>
-        <Panel title="อัปโหลดวิดีโอสำหรับไลฟ์">
-          <div className="cyber-drop" onClick={() => router.push('/live')}>
-            <Upload size={22} />
-            <strong>ไปหน้า Live Session เพื่ออัปโหลด MP4</strong>
-            <small>อัปโหลดวิดีโอ MP4 แล้วเลือกใช้กับบัญชีที่ต้องการ</small>
-          </div>
-          <div className="cyber-small-center">สูงสุด 512 MB ต่อไฟล์</div>
-        </Panel>
-        <Panel title="วิดีโอในคลัง">
-          <div className="cyber-video-grid">
-            {sampleVideos
-              .filter((v) => v.name.includes(search.toLowerCase()))
-              .map((v) => (
-                <div className="cyber-video-card" key={v.name}>
-                  <div className="cyber-video-thumb">
-                    <span className="cyber-play">▶</span>
-                    <span className="cyber-mp4">MP4</span>
-                    <small>{v.code}</small>
-                  </div>
-                  <div className="cyber-video-meta">
-                    <strong>{v.name}</strong>
-                    <small>{v.size}</small>
-                    <Btn onClick={() => notify('วิดีโอตัวอย่างไม่ได้ถูกลบ')}>ลบ</Btn>
-                  </div>
-                </div>
-              ))}
-          </div>
-        </Panel>
       </>
     );
   }
   function commentsView() {
     return (
-      <>
-        <Panel title="ตั้งค่าการตอบอัตโนมัติ">
-          <div className="cyber-inline">
-            <label>
-              เลือกบัญชี{' '}
-              <select>
-                <option>Demo Shop A</option>
-                <option>Demo Shop B</option>
-              </select>
-            </label>
-            <Btn tone="pink" onClick={() => notify('บันทึกการตั้งค่าตัวอย่างแล้ว')}>
-              ▣ บันทึกการตั้งค่า
-            </Btn>
-          </div>
-          <div className="cyber-tabs">
-            {[
-              'ทั่วไป',
-              'ตัวเลือกไลฟ์',
-              'สินค้า',
-              'อัตโนมัติ',
-              'ตอบอัตโนมัติ',
-              'AI ช่วยตอบ',
-              'สถิติ & คอมเมนต์',
-            ].map((t) => (
-              <button className={tab === t ? 'active' : ''} onClick={() => setTab(t)} key={t}>
-                {t}
-              </button>
-            ))}
-          </div>
-          <div className="cyber-form-section">
-            <label className="cyber-check">
-              <input
-                type="checkbox"
-                checked={autoReply}
-                onChange={(e) => setAutoReply(e.target.checked)}
-              />{' '}
-              💬 ตอบคอมเมนต์อัตโนมัติตามคำที่ดักจับ
-            </label>
-            <p>เมื่อมีคอมเมนต์ตรงกับคำที่กำหนด ระบบจะส่งคำตอบกลับในไลฟ์</p>
-            <div className="cyber-empty-rule">
-              ยังไม่มีกฎตอบในข้อมูลตัวอย่าง{' '}
-              <Btn onClick={() => setModal('เพิ่มกฎตอบ')}>+ เพิ่มกฎตอบ</Btn>
-            </div>
-            <label className="cyber-check">
-              <input
-                type="checkbox"
-                checked={welcome}
-                onChange={(e) => setWelcome(e.target.checked)}
-              />{' '}
-              👋 ทักทายคนเข้าไลฟ์
-            </label>
-            <p>ตั้งข้อความทักทายโดยใช้ {'{user}'} แทนชื่อผู้เข้าชม</p>
-            <textarea defaultValue={'ยินดีต้อนรับ {user} เข้าสู่ไลฟ์'} aria-label="ข้อความทักทาย" />
-            <h3>🛡 กันสแปม</h3>
-            <div className="cyber-input-grid">
-              <label>
-                เว้นจังหวะ (วินาที)
-                <input type="number" defaultValue="4" min="1" />
-              </label>
-              <label>
-                กันตอบซ้ำ (วินาที)
-                <input type="number" defaultValue="30" min="1" />
-              </label>
-              <label>
-                สูงสุดต่อนาที
-                <input type="number" defaultValue="12" min="1" />
-              </label>
-            </div>
-          </div>
-        </Panel>
-      </>
+      <Panel title="ตอบอัตโนมัติ">
+        <p className="cyber-account-empty">ยังไม่มีการตั้งค่าการตอบอัตโนมัติที่บันทึกไว้</p>
+      </Panel>
     );
   }
   function analyticsView() {
     return (
-      <>
-        <div className="cyber-section-summary">
-          <label>
-            เลือกบัญชี{' '}
-            <select>
-              <option>Demo Shop A</option>
-              <option>Demo Shop B</option>
-            </select>
-          </label>
-          <Btn onClick={() => notify('แสดงข้อมูลตัวอย่างล่าสุดแล้ว')}>
-            <RefreshCw size={13} /> รีเฟรช
-          </Btn>
-        </div>
-        <div className="cyber-metrics">
-          <div>
-            <strong>24</strong>
-            <span>AI ตอบทั้งหมด</span>
-          </div>
-          <div>
-            <strong>23</strong>
-            <span>สำเร็จ</span>
-          </div>
-          <div>
-            <strong>1</strong>
-            <span>รอตรวจสอบ</span>
-          </div>
-        </div>
-        <div className="cyber-columns">
-          <Panel title="คำถามยอดฮิต">
-            <div className="cyber-list">
-              {[
-                ['ราคาเท่าไร', '8'],
-                ['มีสินค้าอะไรบ้าง', '6'],
-                ['จัดส่งกี่วัน', '4'],
-                ['วิธีสั่งซื้อ', '3'],
-              ].map(([t, n]) => (
-                <div key={t}>
-                  <span>{t}</span>
-                  <Badge tone="cyan">{n}</Badge>
-                </div>
-              ))}
-            </div>
-          </Panel>
-          <Panel title="รายการล่าสุด">
-            <div className="cyber-list">
-              {[
-                'ถามเรื่องสินค้า → AI ตอบแล้ว',
-                'ถามเรื่องราคา → AI ตอบแล้ว',
-                'คำถามใหม่ → รอตรวจสอบ',
-              ].map((t, i) => (
-                <div key={t}>
-                  <span>{t}</span>
-                  <Badge tone={i === 2 ? 'yellow' : 'green'}>{i === 2 ? 'รอ' : 'สำเร็จ'}</Badge>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </div>
-      </>
+      <Panel title="สถิติการตอบของ AI">
+        <p className="cyber-account-empty">ยังไม่มีข้อมูลสถิติการตอบของ AI</p>
+      </Panel>
     );
   }
   function genericView() {
@@ -939,58 +839,19 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <ShoppingCart size={30} />
             <strong>ยังไม่มีบัญชีที่กำลังไลฟ์</strong>
             <small>ยอดขายจะแสดงเมื่อเชื่อม Live Stats และข้อมูลสินค้า</small>
-            <Btn onClick={() => notify('แสดงข้อมูลตัวอย่างล่าสุดแล้ว')}>⟳ รีเฟรชยอด</Btn>
           </div>
         </Panel>
       );
     if (section === 'playlists')
       return (
         <Panel title="เพลย์ลิสต์">
-          <div className="cyber-row">
-            <span>▶ โปรโมชันชุด A</span>
-            <Badge tone="green">2 วิดีโอ</Badge>
-            <Btn onClick={() => setModal('เพลย์ลิสต์')}>ดูรายการ</Btn>
-          </div>
-          <div className="cyber-row">
-            <span>▶ สินค้าใหม่</span>
-            <Badge tone="yellow">ร่าง</Badge>
-            <Btn onClick={() => setModal('เพลย์ลิสต์')}>ดูรายการ</Btn>
-          </div>
-        </Panel>
-      );
-    if (section === 'products')
-      return (
-        <Panel title="ชุดสินค้า">
-          <div className="cyber-row">
-            <span>▣ ชุดทดลอง A</span>
-            <Badge tone="green">3 รายการ</Badge>
-            <Btn onClick={() => setModal('ชุดสินค้า')}>ดูรายการ</Btn>
-          </div>
-          <div className="cyber-row">
-            <span>▣ ชุดทดลอง B</span>
-            <Badge tone="yellow">ร่าง</Badge>
-            <Btn onClick={() => setModal('ชุดสินค้า')}>ดูรายการ</Btn>
-          </div>
-          <p className="cyber-hint">
-            พร้อมเชื่อม Search Product, Add Product และ Pin Product หลังยืนยัน endpoint
-          </p>
+          <p className="cyber-account-empty">ยังไม่มีเพลย์ลิสต์ที่บันทึกไว้</p>
         </Panel>
       );
     if (section === 'logs')
       return (
         <Panel title="บันทึกกิจกรรม">
-          <div className="cyber-row">
-            <span>09:32 · ซิงก์รายการสินค้า</span>
-            <Badge tone="green">สำเร็จ</Badge>
-          </div>
-          <div className="cyber-row">
-            <span>09:20 · สร้างเพลย์ลิสต์ตัวอย่าง</span>
-            <Badge tone="green">สำเร็จ</Badge>
-          </div>
-          <div className="cyber-row">
-            <span>08:55 · ตรวจสอบบัญชีตัวอย่าง B</span>
-            <Badge tone="yellow">รอตรวจสอบ</Badge>
-          </div>
+          <p className="cyber-account-empty">ยังไม่มีบันทึกกิจกรรมที่แสดงได้</p>
         </Panel>
       );
     return (
@@ -1012,18 +873,6 @@ export default function CyberShell({ section, username }: { section: Page; usern
           <Badge tone={dependencies.worker === 'ready' ? 'green' : 'yellow'}>
             {dependencies.worker === 'ready' ? 'ทำงาน' : 'รอเชื่อม'}
           </Badge>
-        </div>
-        <div className="cyber-row">
-          <span>▣ Prisma Migration v2 · โอ๊ต</span>
-          <Badge tone="yellow">รอเชื่อม</Badge>
-        </div>
-        <div className="cyber-row">
-          <span>▣ TikTok API · ซี</span>
-          <Badge tone="yellow">รอยืนยัน Endpoint</Badge>
-        </div>
-        <div className="cyber-row">
-          <span>▣ Comment / Chat Contract · ภูมิ</span>
-          <Badge tone="yellow">รอยืนยัน</Badge>
         </div>
         <div className="cyber-row">
           <span>▣ บัญชีผู้ดูแลระบบ</span>
@@ -1102,7 +951,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
           </button>
           <h1>{names[section]}</h1>
           <div className="cyber-stat">
-            <i /> {section === 'live' ? liveCount : '—'} <small>ส่งสัญญาณ</small>
+            <i /> {section === 'live' || sessionsLoaded ? liveCount : '—'} <small>ส่งสัญญาณ</small>
           </div>
           <div className="cyber-stat red">
             {accountsLoading ? '…' : accounts.length} <small>บัญชีที่เพิ่ม</small>
@@ -1119,7 +968,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <span>●</span>
             <div>
               <strong>{username}</strong>
-              <small>บัญชีตัวอย่างแสดงแยกด้านล่าง</small>
+              <small>บัญชีผู้ดูแลระบบ</small>
             </div>
             <Btn tone="danger" onClick={logout}>
               <LogOut size={12} /> ออก
@@ -1127,11 +976,14 @@ export default function CyberShell({ section, username }: { section: Page; usern
           </div>
           <div className="cyber-top-actions">
             <Btn
-              onClick={() =>
-                section === 'accounts' || section === 'dashboard'
-                  ? void loadAccounts()
-                  : notify('แสดงข้อมูลตัวอย่างล่าสุดแล้ว')
-              }
+              onClick={() => {
+                if (section === 'accounts' || section === 'dashboard') {
+                  void loadAccounts();
+                  void loadDashboardSessions();
+                } else {
+                  window.location.reload();
+                }
+              }}
             >
               <RefreshCw size={13} /> รีเฟรช
             </Btn>
@@ -1153,7 +1005,9 @@ export default function CyberShell({ section, username }: { section: Page; usern
               }}
             />
           ) : section === 'videos' ? (
-            videoView()
+            <VideoLibraryPanel />
+          ) : section === 'products' ? (
+            <ProductCurlPanel />
           ) : section === 'comments' ? (
             commentsView()
           ) : section === 'analytics' ? (
@@ -1183,7 +1037,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
               <form onSubmit={saveAccount}>
                 <div className="cyber-modal-body cyber-account-form">
                   <p>
-                    เพิ่มด้วย sessionid แบบในตัวอย่าง หรือใช้ Copy as cURL (bash) จาก DevTools
+                    เพิ่มด้วย sessionid หรือใช้ Copy as cURL (bash) จาก DevTools
                     ระบบจะบันทึกบัญชีเมื่ออ่านตัวตนจาก TikTok สำเร็จเท่านั้น
                   </p>
                   <label>
@@ -1288,22 +1142,14 @@ export default function CyberShell({ section, username }: { section: Page; usern
                       maxLength={120}
                     />
                   </label>
-                  <p>ชื่อนี้แสดงในเว็บเท่านั้น ต้องตั้งชื่อห้อง LIVE ใน TikTok เอง</p>
+                  <p>เมื่อกดเริ่มไลฟ์ ระบบจะใช้ชื่อนี้สร้างห้องและดึงคีย์โดยอัตโนมัติ</p>
                   <div className="cyber-stream-settings">
-                    <strong>ปลายทางสำหรับส่งวิดีโอ</strong>
-                    <p>
-                      บันทึกครั้งแรกแล้วเริ่มส่งจากการ์ดบัญชีได้ หากห้อง LIVE ออก URL หรือ key ใหม่
-                      ให้บันทึกค่าใหม่ที่นี่
-                    </p>
+                    <strong>วิดีโอที่จะใช้ไลฟ์</strong>
+                    <p>เลือก MP4 แล้วกดบันทึกการตั้งค่า ระบบจะสร้างห้องใหม่เมื่อกดเริ่มไลฟ์</p>
                     {streamLoading ? (
                       <p>กำลังโหลดค่าการสตรีม…</p>
                     ) : (
                       <>
-                        <p>
-                          {streamSession?.hasRtmpConfig
-                            ? 'บันทึกปลายทางไว้แล้ว (ไม่แสดง key)'
-                            : 'ยังไม่บันทึกปลายทาง'}
-                        </p>
                         <label>
                           วิดีโอ MP4
                           <select
@@ -1320,21 +1166,6 @@ export default function CyberShell({ section, username }: { section: Page; usern
                           </select>
                         </label>
                         {streamVideos.length === 0 && <p>อัปโหลด MP4 ในหน้า Live Session ก่อน</p>}
-                        {streamSession?.hasRtmpConfig &&
-                          streamVideoId !== streamSession.videoId && (
-                            <button
-                              type="button"
-                              className="cyber-btn cyan"
-                              onClick={() => void saveStreamVideo()}
-                              disabled={
-                                !streamVideoId ||
-                                streamBusy !== '' ||
-                                streamSession.status === 'live'
-                              }
-                            >
-                              {streamBusy === 'video' ? 'กำลังบันทึก…' : 'ใช้วิดีโอนี้'}
-                            </button>
-                          )}
                         <label>
                           RTMP URL
                           <input
@@ -1407,6 +1238,16 @@ export default function CyberShell({ section, username }: { section: Page; usern
                   </Btn>
                 </div>
               </form>
+            ) : modal === 'เพิ่มสินค้า' && selectedAccount ? (
+              <div>
+                <div className="cyber-modal-body">
+                  <p>ชุดสินค้าสำหรับ {selectedAccount.alias}</p>
+                  <QuickProductSetPanel accountId={selectedAccount.id} />
+                </div>
+                <div className="cyber-modal-actions">
+                  <Btn onClick={closeModal}>ปิด</Btn>
+                </div>
+              </div>
             ) : modal === 'ลบบัญชี' && selectedAccount ? (
               <div>
                 <div className="cyber-modal-body">
@@ -1433,57 +1274,28 @@ export default function CyberShell({ section, username }: { section: Page; usern
                   </Btn>
                 </div>
               </div>
-            ) : (
+            ) : modal === 'ภาพรวมทุกบัญชี' ? (
               <>
                 <div className="cyber-modal-body">
-                  {modal === 'ภาพรวมทุกบัญชี' ? (
-                    <>
-                      <p>บัญชีที่เพิ่ม {accounts.length} · ไลฟ์จริง 0 · ข้อมูลตัวอย่าง 2</p>
-                      {accounts.map((account) => (
-                        <div className="cyber-row" key={account.id}>
-                          <span>{account.alias}</span>
-                          <Badge
-                            tone={account.verificationStatus === 'connected' ? 'green' : 'yellow'}
-                          >
-                            {account.verificationStatus === 'connected'
-                              ? 'เชื่อมต่อแล้ว'
-                              : 'ยังไม่เชื่อมต่อ'}
-                          </Badge>
-                        </div>
-                      ))}
-                      <div className="cyber-row">
-                        <span>Demo Shop A</span>
-                        <Badge tone="dim">MOCK</Badge>
-                      </div>
-                      <div className="cyber-row">
-                        <span>Demo Shop B</span>
-                        <Badge tone="dim">MOCK</Badge>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p>ส่วนนี้เป็นหน้าตัวอย่างสำหรับการเชื่อมงานของทีม</p>
-                      <label>
-                        ชื่อรายการ
-                        <input placeholder="กรอกข้อมูลตัวอย่าง" />
-                      </label>
-                    </>
-                  )}
+                  <p>
+                    บัญชีที่เพิ่ม {accounts.length} · กำลังส่งสัญญาณ {liveCount}
+                  </p>
+                  {accounts.map((account) => (
+                    <div className="cyber-row" key={account.id}>
+                      <span>{account.alias}</span>
+                      <Badge tone={account.verificationStatus === 'connected' ? 'green' : 'yellow'}>
+                        {account.verificationStatus === 'connected'
+                          ? 'เชื่อมต่อแล้ว'
+                          : 'ยังไม่เชื่อมต่อ'}
+                      </Badge>
+                    </div>
+                  ))}
                 </div>
                 <div className="cyber-modal-actions">
                   <Btn onClick={closeModal}>ปิด</Btn>
-                  <Btn
-                    tone="pink"
-                    onClick={() => {
-                      closeModal();
-                      notify('บันทึกตัวอย่างแล้ว');
-                    }}
-                  >
-                    บันทึก
-                  </Btn>
                 </div>
               </>
-            )}
+            ) : null}
           </div>
         </div>
       )}

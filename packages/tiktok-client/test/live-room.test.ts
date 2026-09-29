@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { createTikTokLiveRoom, parseCreatedRoom, type CreateRoomInput } from '../src';
+import { createTikTokLiveRoom, endTikTokLiveRoom, parseCreatedRoom, type CreateRoomInput } from '../src';
 
 const input: CreateRoomInput = {
   title: 'Test room',
@@ -48,6 +48,10 @@ test('builds a signed create request and parses the room without a real network 
         createHash('md5').update(String(init?.body)).digest('hex'),
       );
       assert.equal(new URLSearchParams(String(init?.body)).get('title'), input.title);
+      assert.equal(
+        new URLSearchParams(String(init?.body)).get('close_room_when_close_stream'),
+        'true',
+      );
       return Response.json(success);
     },
   );
@@ -98,4 +102,28 @@ test('rejects malformed signing headers before sending any request', async () =>
     /invalid headers/,
   );
   assert.equal(called, false);
+});
+
+test('ends a known LIVE room with signed finish requests', async () => {
+  let calls = 0;
+  const result = await endTikTokLiveRoom(
+    { cookieHeader: input.cookieHeader, studioVersion: input.studioVersion,
+      deviceId: input.deviceId, installId: input.installId,
+      roomId: '1234567890123456789', streamId: '2234567890123456789' },
+    async ({ stub }) => {
+      assert.match(stub, /^[a-f0-9]{32}$/);
+      return { 'x-khronos': '1234567890', 'x-ladon': 'fake-ladon', 'x-argus': 'fake-argus' };
+    },
+    async (url, init) => {
+      calls++;
+      assert.equal(new URL(String(url)).pathname, '/webcast/room/ping/anchor/');
+      assert.equal(init?.method, 'POST');
+      assert.equal(new Headers(init?.headers).get('cookie'), input.cookieHeader);
+      assert.equal(new URLSearchParams(String(init?.body)).get('status'), '4');
+      assert.equal(new URLSearchParams(String(init?.body)).get('room_id'), '1234567890123456789');
+      return Response.json({ status_code: 0 });
+    },
+  );
+  assert.equal(result, 'ended');
+  assert.equal(calls, 2);
 });

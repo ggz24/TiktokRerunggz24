@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Play, RefreshCw, Settings, Square, Upload, X, Zap } from 'lucide-react';
+import { Play, RefreshCw, Settings, Square, Upload, X } from 'lucide-react';
+import { maxVideoBytes, uploadMp4 } from '@/lib/video-upload';
 
 type LiveAccount = {
   id: string;
@@ -24,11 +25,10 @@ type LiveSession = {
   videoId?: string | null;
   videoName?: string | null;
   hasRtmpConfig: boolean;
+  hasOpenRoom: boolean;
   startedAt?: string | null;
   error?: string | null;
 };
-
-const maxVideoBytes = 512 * 1024 * 1024;
 
 function statusLabel(status: LiveSession['status']) {
   switch (status) {
@@ -59,7 +59,7 @@ function requestError(status: number, action: string) {
   if (status === 401) return 'กรุณาเข้าสู่ระบบอีกครั้ง';
   if (status === 404) return 'ไม่พบบัญชีหรือวิดีโอที่เลือก กรุณารีเฟรชข้อมูล';
   if (status === 409) return 'สถานะสตรีมเปลี่ยนไป กรุณารีเฟรชแล้วลองอีกครั้ง';
-  if (status === 413) return 'ไฟล์ MP4 ใหญ่เกิน 512 MB';
+  if (status === 413) return 'ไฟล์ MP4 ใหญ่เกิน 8 GB หรือพื้นที่คลังเต็ม';
   if (status === 503 && action === 'สร้างห้อง LIVE')
     return 'ระบบดึงคีย์อัตโนมัติยังไม่พร้อม กรุณาตรวจการตั้งค่า RapidAPI บนเซิร์ฟเวอร์';
   if (status === 400 || status === 415 || status === 422) {
@@ -82,7 +82,8 @@ export default function LiveSessionPanel({
   const [videos, setVideos] = useState<LiveVideo[]>([]);
   const [videoSelection, setVideoSelection] = useState<Record<string, string>>({});
   const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState<'upload' | 'video' | 'start' | 'stop' | 'delete' | 'auto' | ''>(
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [busy, setBusy] = useState<'upload' | 'video' | 'start' | 'stop' | 'delete' | ''>(
     '',
   );
   const [liveTitle, setLiveTitle] = useState('');
@@ -238,10 +239,10 @@ export default function LiveSessionPanel({
   const active = status === 'starting' || status === 'live' || status === 'stopping';
   const canStart = Boolean(
     connected &&
-    session?.hasRtmpConfig &&
-    session.videoId &&
-    selectedVideoId === session.videoId &&
+    selectedVideoId &&
+    liveTitle.trim() &&
     !active &&
+    !session?.hasOpenRoom &&
     !busy &&
     !statusUnavailable,
   );
@@ -250,24 +251,15 @@ export default function LiveSessionPanel({
     event.preventDefault();
     if (!file || busy) return;
     if (!file.name.toLowerCase().endsWith('.mp4') || file.size < 1 || file.size > maxVideoBytes) {
-      setError('เลือกไฟล์ MP4 ขนาดไม่เกิน 512 MB');
+      setError('เลือกไฟล์ MP4 ขนาดไม่เกิน 8 GB');
       return;
     }
     setBusy('upload');
+    setUploadProgress(0);
     setError('');
     setNotice('');
     try {
-      const response = await fetch('/api/live/videos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'video/mp4', 'x-file-name': encodeURIComponent(file.name) },
-        body: file,
-      });
-      if (!response.ok) throw new Error(requestError(response.status, 'อัปโหลดวิดีโอ'));
-      const data: unknown = await response.json();
-      if (!data || typeof data !== 'object' || !('item' in data) || !data.item) {
-        throw new Error('อัปโหลดวิดีโอไม่สำเร็จ กรุณาลองอีกครั้ง');
-      }
-      const item = data.item as LiveVideo;
+      const item = await uploadMp4(file, setUploadProgress);
       setVideos((current) => [item, ...current.filter((video) => video.id !== item.id)]);
       if (selectedAccountId) {
         setVideoSelection((current) => ({ ...current, [selectedAccountId]: item.id }));
@@ -279,53 +271,12 @@ export default function LiveSessionPanel({
       setError(caught instanceof Error ? caught.message : 'อัปโหลดวิดีโอไม่สำเร็จ');
     } finally {
       setBusy('');
-    }
-  }
-
-  async function fetchLiveDestination() {
-    if (!selectedAccountId || !connected || !selectedVideoId || !liveTitle.trim() || busy || active)
-      return;
-    setBusy('auto');
-    setError('');
-    setNotice('');
-    setCreatedRoomId('');
-    try {
-      const response = await fetch(
-        `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/auto-destination`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoId: selectedVideoId, title: liveTitle.trim() }),
-        },
-      );
-      if (!response.ok) throw new Error(requestError(response.status, 'สร้างห้อง LIVE'));
-      const data: unknown = await response.json();
-      if (
-        !data ||
-        typeof data !== 'object' ||
-        !('item' in data) ||
-        !('roomId' in data) ||
-        typeof data.roomId !== 'string' ||
-        !data.item
-      ) {
-        throw new Error('TikTok ไม่ส่งข้อมูลห้อง LIVE กลับมา');
-      }
-      const item = data.item as LiveSession;
-      setSessions((current) => [
-        ...current.filter((entry) => entry.accountId !== selectedAccountId),
-        item,
-      ]);
-      setCreatedRoomId(data.roomId);
-      setNotice(`สร้างห้อง ${data.roomId} และบันทึกปลายทางแล้ว ตรวจห้องบน TikTok ก่อนเริ่มส่งคลิป`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'สร้างห้อง LIVE ไม่สำเร็จ');
-    } finally {
-      setBusy('');
+      setUploadProgress(null);
     }
   }
 
   async function saveVideoSelection() {
-    if (!selectedAccountId || !connected || !session?.hasRtmpConfig || !selectedVideoId || busy)
+    if (!selectedAccountId || !connected || !selectedVideoId || busy)
       return;
     setBusy('video');
     setError('');
@@ -394,9 +345,17 @@ export default function LiveSessionPanel({
     setError('');
     setNotice('');
     try {
+      if (action === 'start' && selectedVideoId !== session?.videoId) {
+        const selected = await fetch(`/api/live/sessions/${encodeURIComponent(selectedAccountId)}/video`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId: selectedVideoId }),
+        });
+        if (!selected.ok) throw new Error(requestError(selected.status, 'บันทึกวิดีโอ'));
+      }
       const response = await fetch(
-        `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/${action}`,
-        { method: 'POST' },
+        `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/${action === 'start' ? 'start-auto' : 'stop'}`,
+        { method: 'POST', ...(action === 'start' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: liveTitle.trim() }) } : {}) },
       );
       if (!response.ok) {
         throw new Error(
@@ -412,7 +371,19 @@ export default function LiveSessionPanel({
         ...current.filter((session) => session.accountId !== selectedAccountId),
         item,
       ]);
-      setNotice(action === 'start' ? 'กำลังเริ่มส่งสัญญาณ รอระบบยืนยันสถานะ' : 'สั่งหยุดสตรีมแล้ว');
+      if (action === 'start') {
+        setCreatedRoomId('roomId' in data && typeof data.roomId === 'string' ? data.roomId : '');
+        setNotice('สร้างห้อง LIVE และเริ่มส่งวิดีโอแล้ว');
+        if ('productsOutcome' in data &&
+          (data.productsOutcome === 'rejected' || data.productsOutcome === 'unverified')) {
+          setError('ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop');
+        }
+      } else {
+        const roomEnd = 'roomEnd' in data ? data.roomEnd : '';
+        if (roomEnd === 'ended') setNotice('หยุดวิดีโอแล้ว TikTok รับคำสั่งปิดห้อง LIVE');
+        else if (roomEnd === 'no_room') setNotice('หยุดวิดีโอแล้ว ไม่พบห้อง LIVE ที่เปิดอยู่');
+        else setError('หยุดวิดีโอแล้ว แต่ยังยืนยันการปิดห้อง TikTok ไม่ได้ กรุณาตรวจใน TikTok Shop');
+      }
       if (action === 'start') setStatusModalOpen(true);
       void refreshStatus(selectedAccountId);
     } catch (caught) {
@@ -524,7 +495,7 @@ export default function LiveSessionPanel({
         <div className="cyber-live-section">
           <form className="cyber-live-form" onSubmit={uploadVideo}>
             <label>
-              เลือกไฟล์จากเครื่อง (สูงสุด 512 MB)
+              เลือกไฟล์จากเครื่อง (สูงสุด 8 GB)
               <input
                 ref={fileInput}
                 type="file"
@@ -537,6 +508,9 @@ export default function LiveSessionPanel({
               <Upload size={13} /> {busy === 'upload' ? 'กำลังอัปโหลด…' : 'อัปโหลด MP4'}
             </button>
           </form>
+          {busy === 'upload' && uploadProgress !== null && (
+            <div role="status">กำลังอัปโหลด {uploadProgress}% — รอให้ระบบบันทึกไฟล์เสร็จก่อนปิดหน้านี้</div>
+          )}
           <label>
             วิดีโอที่จะส่ง
             <select
@@ -558,7 +532,7 @@ export default function LiveSessionPanel({
               ))}
             </select>
           </label>
-          {session?.hasRtmpConfig && selectedVideoId !== session.videoId && (
+          {selectedVideoId && selectedVideoId !== session?.videoId && (
             <div className="cyber-live-video-change">
               <small>วิดีโอที่เลือกยังไม่ถูกบันทึกสำหรับบัญชีนี้</small>
               <button
@@ -592,7 +566,7 @@ export default function LiveSessionPanel({
       </section>
       <section className="cyber-panel">
         <div className="cyber-panel-title">
-          <span className="cyber-spark">▪</span> ดึงปลายทาง LIVE อัตโนมัติ
+          <span className="cyber-spark">▪</span> ตั้งชื่อห้อง LIVE
         </div>
         <div className="cyber-live-section">
           <label>
@@ -606,25 +580,13 @@ export default function LiveSessionPanel({
               disabled={busy !== '' || active}
             />
           </label>
-          <button
-            className="cyber-btn pink"
-            type="button"
-            onClick={() => void fetchLiveDestination()}
-            disabled={!connected || !selectedVideoId || !liveTitle.trim() || busy !== '' || active}
-          >
-            <Zap size={13} /> {busy === 'auto' ? 'กำลังสร้างห้อง…' : 'สร้างห้องและดึงคีย์อัตโนมัติ'}
-          </button>
           {createdRoomId && <span>ห้องที่สร้าง: {createdRoomId}</span>}
-          <small>
-            การกดปุ่มนี้จะสร้างห้อง LIVE จริงบน TikTok และบันทึกปลายทางแบบเข้ารหัส
-            คลิปยังไม่เริ่มส่งจนกว่าจะกดปุ่มเริ่มส่งสัญญาณด้านล่าง
-          </small>
-          <small>หากบริการลงลายเซ็นหรือ TikTok ไม่ตอบรับ ให้ใช้ปลายทาง RTMP ที่ตั้งค่าเองได้</small>
+          <small>กดเริ่มไลฟ์เพื่อสร้างห้อง ดึงคีย์ และเริ่มส่งวิดีโอในครั้งเดียว</small>
         </div>
       </section>
-      {selectedAccountId && !session?.hasRtmpConfig && (
+      {selectedAccountId && (!selectedVideoId || !liveTitle.trim()) && (
         <div className="cyber-live-setup">
-          <span>บัญชีนี้ยังไม่มีปลายทางสตรีมที่บันทึกไว้</span>
+          <span>เลือกวิดีโอและตั้งชื่อไลฟ์ก่อนเริ่ม</span>
           <button
             className="cyber-btn cyan"
             type="button"
@@ -651,12 +613,12 @@ export default function LiveSessionPanel({
           <button
             className="cyber-btn danger"
             type="button"
-            disabled={busy !== '' || (status !== 'starting' && status !== 'live')}
+            disabled={busy !== '' || (status !== 'starting' && status !== 'live' && !session?.hasOpenRoom)}
             onClick={() => void changeStream('stop')}
           >
-            <Square size={13} fill="currentColor" /> {busy === 'stop' ? 'กำลังหยุด…' : 'หยุดสตรีม'}
+            <Square size={13} fill="currentColor" /> {busy === 'stop' ? 'กำลังลงไลฟ์…' : 'ลงไลฟ์'}
           </button>
-          <span>เริ่มได้เมื่อบัญชีเชื่อมต่อ มีวิดีโอ และบันทึกปลายทางในตั้งค่าบัญชีแล้ว</span>
+          <span>เริ่มได้เมื่อบัญชีเชื่อมต่อ มีวิดีโอ และตั้งชื่อไลฟ์แล้ว</span>
         </div>
       </section>
       {error && (

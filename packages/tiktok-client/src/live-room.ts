@@ -38,6 +38,11 @@ export type CreatedRoom = {
   shareUrl?: string;
 };
 
+export type EndRoomInput = Omit<CreateRoomInput, 'title' | 'categoryId'> & {
+  roomId?: string | null;
+  streamId?: string | null;
+};
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -139,7 +144,7 @@ export async function createTikTokLiveRoom(
     chat_auth: '1',
     age_restricted: '0',
     cover_uri: '',
-    close_room_when_close_stream: 'false',
+    close_room_when_close_stream: 'true',
     hashtag_id: input.categoryId,
     game_tag_id: '0',
     game_bitrate_type: 'high',
@@ -184,4 +189,68 @@ export async function createTikTokLiveRoom(
   });
   if (!response.ok) throw new Error(`TikTok room creation returned HTTP ${response.status}.`);
   return parseCreatedRoom(await response.json());
+}
+
+/** Sends the Live Studio finish status for the account's current room. */
+export async function endTikTokLiveRoom(
+  input: EndRoomInput,
+  sign: RoomSigner,
+  http: typeof fetch = fetch,
+): Promise<'ended' | 'no_room'> {
+  if (!input.cookieHeader || /[\r\n]/.test(input.cookieHeader) ||
+    !/^\d+(?:\.\d+)+$/.test(input.studioVersion) ||
+    !/^\d{1,32}$/.test(input.deviceId) || !/^\d{1,32}$/.test(input.installId)) {
+    throw new Error('LIVE room settings are incomplete.');
+  }
+  const region = input.region?.toLowerCase() ?? '';
+  if (region && !/^[a-z]{2,8}$/.test(region)) throw new Error('Invalid LIVE region.');
+  const params: Record<string, string> = {
+    aid: '8311', app_name: 'tiktok_live_studio', device_id: input.deviceId,
+    install_id: input.installId, channel: 'studio', version_code: input.studioVersion,
+    device_platform: 'windows', priority_region: region, live_mode: '6',
+  };
+  const request = async (method: 'GET' | 'POST', path: string, body = '') => {
+    const url = new URL(path, webcastOrigin);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    const stub = body ? createHash('md5').update(body).digest('hex') : '';
+    const signature = await sign({ timestamp: Math.floor(Date.now() / 1000), aid: '8311',
+      device_id: input.deviceId, params, query: url.search.slice(1), stub });
+    if (!validSignature(signature)) throw new Error('Room signer returned invalid headers.');
+    const response = await http(url, {
+      method,
+      headers: {
+        accept: 'application/json', cookie: input.cookieHeader,
+        ...(input.userAgent ? { 'user-agent': input.userAgent } : {}),
+        ...(body ? { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', 'x-ss-stub': stub } : {}),
+        ...signature,
+        ...(region ? { 'x-tt-store-region': region } : {}),
+      },
+      ...(body ? { body } : {}),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`TikTok LIVE request returned HTTP ${response.status}.`);
+    return response.json() as Promise<unknown>;
+  };
+  let roomId = input.roomId ?? '';
+  let streamId = input.streamId ?? '';
+  if (!roomId || !streamId) {
+    const result = record(await request('GET', '/webcast/room/continue/'));
+    const room = record(record(result?.data)?.room);
+    const attrs = record(room?.living_room_attrs);
+    roomId = string(attrs?.room_id_str ?? attrs?.room_id ?? room?.id_str ?? room?.id);
+    streamId = string(room?.stream_id_str ?? room?.stream_id);
+    if (!roomId && !streamId) return 'no_room';
+  }
+  if (!/^\d{8,24}$/.test(roomId) || !/^\d{8,24}$/.test(streamId)) {
+    throw new Error('TikTok did not provide a valid LIVE room identifier.');
+  }
+  const body = new URLSearchParams({ status: '4', room_id: roomId, stream_id: streamId }).toString();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = record(await request('POST', '/webcast/room/ping/anchor/', body));
+    const code = string(result?.status_code);
+    if (code !== '0' && code !== '30003' && code !== '30003001') {
+      throw new Error('TikTok did not accept the LIVE finish request.');
+    }
+  }
+  return 'ended';
 }

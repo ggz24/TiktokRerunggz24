@@ -17,6 +17,7 @@ export function registerLiveRoutes(
   app: FastifyInstance,
   service: LiveService,
   ownerFromHeaders: (headers: Record<string, unknown>) => string | null,
+  onRoomStarted?: (ownerId: string, accountId: string, roomId: string) => Promise<'accepted' | 'rejected' | 'unverified' | 'none'>,
 ): void {
   app.addContentTypeParser(['video/mp4', 'application/octet-stream'], (_request, payload, done) =>
     done(null, payload),
@@ -192,6 +193,27 @@ export function registerLiveRoutes(
     }
   });
 
+  app.post('/api/v1/live/sessions/:accountId/start-auto', async (request, reply) => {
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { accountId } = request.params as { accountId: string };
+    if (!uuidPattern.test(accountId)) return reply.status(400).send({ error: 'Invalid account ID.' });
+    const body = request.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).length !== 1 || typeof (body as { title?: unknown }).title !== 'string') {
+      return reply.status(400).send({ error: 'Invalid LIVE title.' });
+    }
+    try {
+      const result = await service.startAuto(ownerId, accountId, (body as { title: string }).title);
+      const productsOutcome = onRoomStarted
+        ? await onRoomStarted(ownerId, accountId, result.roomId).catch(() => 'unverified' as const)
+        : 'none';
+      return { item: result.session, roomId: result.roomId, productsOutcome };
+    } catch (error) {
+      return failure(reply, error);
+    }
+  });
+
   app.post('/api/v1/live/sessions/:accountId/stop', async (request, reply) => {
     const ownerId = ownerFromHeaders(request.headers);
     if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
@@ -199,7 +221,8 @@ export function registerLiveRoutes(
     if (!uuidPattern.test(accountId))
       return reply.status(400).send({ error: 'Invalid account ID.' });
     try {
-      return { item: await service.stop(ownerId, accountId) };
+      const result = await service.stopAndEnd(ownerId, accountId);
+      return { item: result.session, roomEnd: result.roomEnd };
     } catch (error) {
       return failure(reply, error);
     }

@@ -5,7 +5,8 @@ import { createPgAccountStore, ensureAccountTable } from './account-store.js';
 import { parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
 import { createPgLiveStore, ensureLiveTables } from './live-store.js';
 import { LiveService } from './live-service.js';
-import { createRapidApiRoomSigner, createTikTokLiveRoom } from '@live-hub/tiktok-client';
+import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
+import { createRapidApiRoomSigner, createTikTokLiveRoom, endTikTokLiveRoom } from '@live-hub/tiktok-client';
 
 const port = Number(process.env.API_PORT ?? 4000);
 const databaseUrl =
@@ -35,6 +36,7 @@ let liveService: LiveService | undefined;
 if (accountConfig) {
   await ensureAccountTable(pool);
   await ensureLiveTables(pool);
+  await ensureProductSetTable(pool);
   const rapidApiKey = process.env.RAPIDAPI_KEY?.trim();
   const autoRoomCreator = rapidApiKey
     ? async ({
@@ -61,6 +63,22 @@ if (accountConfig) {
         return room;
       }
     : undefined;
+  const autoRoomEnder = rapidApiKey
+    ? async ({ cookieHeader, userAgent, roomId, streamId }: {
+        cookieHeader: string;
+        userAgent?: string;
+        roomId?: string | null;
+        streamId?: string | null;
+      }) => endTikTokLiveRoom({
+        cookieHeader,
+        studioVersion: process.env.TIKTOK_STUDIO_VERSION ?? '1.36.6',
+        deviceId: process.env.TIKTOK_STUDIO_DEVICE_ID ?? '0',
+        installId: process.env.TIKTOK_STUDIO_INSTALL_ID ?? '0',
+        roomId,
+        streamId,
+        ...(userAgent ? { userAgent } : {}),
+      }, createRapidApiRoomSigner(rapidApiKey))
+    : undefined;
   liveService = new LiveService(
     createPgLiveStore(pool),
     accountConfig.store,
@@ -70,6 +88,7 @@ if (accountConfig) {
     undefined,
     undefined,
     autoRoomCreator,
+    autoRoomEnder,
   );
 }
 
@@ -89,6 +108,8 @@ const app = createApp(
   },
   accountConfig,
   liveService,
+  undefined,
+  accountConfig ? createPgProductSetStore(pool, accountConfig.encryptionKey) : undefined,
 );
 
 async function shutdown() {

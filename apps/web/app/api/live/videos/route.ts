@@ -2,7 +2,7 @@ import { liveError, proxyLive } from '../_proxy';
 
 export const dynamic = 'force-dynamic';
 
-const maxVideoBytes = 512 * 1024 * 1024;
+const maxVideoBytes = 8 * 1024 * 1024 * 1024;
 
 export async function GET(request: Request) {
   return proxyLive(request, '/api/v1/live/videos', 'GET');
@@ -18,12 +18,12 @@ export async function POST(request: Request) {
   }
   const size = Number(request.headers.get('content-length'));
   if (Number.isFinite(size) && size > maxVideoBytes) {
-    return liveError('ไฟล์วิดีโอใหญ่เกิน 512 MB', 413);
+    return liveError('ไฟล์วิดีโอใหญ่เกิน 8 GB', 413);
   }
   return proxyLive(request, '/api/v1/live/videos', 'POST', {
     contentType: 'video/mp4',
     fileName,
     body: request.body,
-    timeoutMs: 600_000,
+    timeoutMs: 3_600_000,
   });
 }

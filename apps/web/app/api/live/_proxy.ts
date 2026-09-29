@@ -27,7 +27,7 @@ function upstreamError(status: number) {
   }
   if (status === 404) return liveError('ไม่พบบัญชีหรือวิดีโอที่เลือก', 404);
   if (status === 409) return liveError('สถานะสตรีมไม่พร้อมสำหรับคำสั่งนี้', 409);
-  if (status === 413) return liveError('ไฟล์วิดีโอใหญ่เกิน 512 MB', 413);
+  if (status === 413) return liveError('ไฟล์ใหญ่เกิน 8 GB หรือพื้นที่คลังเต็ม', 413);
   return liveError('ระบบสตรีมยังไม่พร้อม กรุณาลองอีกครั้ง', 503);
 }
 
@@ -63,6 +63,7 @@ function safeSession(value: unknown) {
     videoId: typeof item.videoId === 'string' ? item.videoId : null,
     videoName: typeof item.videoName === 'string' ? item.videoName : null,
     hasRtmpConfig: item.hasRtmpConfig === true,
+    hasOpenRoom: item.hasOpenRoom === true,
     startedAt: typeof item.startedAt === 'string' ? item.startedAt : null,
   };
 }
@@ -78,11 +79,22 @@ function safeResult(path: string, result: unknown) {
     if (data.item) {
       const item = safeSession(data.item);
       if (
-        path.endsWith('/auto-destination') &&
+        (path.endsWith('/auto-destination') || path.endsWith('/start-auto')) &&
         typeof data.roomId === 'string' &&
         /^\d{8,24}$/.test(data.roomId)
       ) {
-        return { item, roomId: data.roomId };
+        return {
+          item,
+          roomId: data.roomId,
+          ...(path.endsWith('/start-auto') &&
+          ['accepted', 'rejected', 'unverified', 'none'].includes(String(data.productsOutcome))
+            ? { productsOutcome: data.productsOutcome }
+            : {}),
+        };
+      }
+      if (path.endsWith('/stop') &&
+        ['ended', 'no_room', 'unavailable', 'unverified'].includes(String(data.roomEnd))) {
+        return { item, roomEnd: data.roomEnd };
       }
       return { item };
     }
