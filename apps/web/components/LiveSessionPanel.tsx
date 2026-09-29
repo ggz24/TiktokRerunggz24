@@ -83,9 +83,7 @@ export default function LiveSessionPanel({
   const [videoSelection, setVideoSelection] = useState<Record<string, string>>({});
   const [file, setFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [busy, setBusy] = useState<'upload' | 'video' | 'start' | 'stop' | 'delete' | ''>(
-    '',
-  );
+  const [busy, setBusy] = useState<'upload' | 'video' | 'start' | 'stop' | 'delete' | ''>('');
   const [liveTitle, setLiveTitle] = useState('');
   const [createdRoomId, setCreatedRoomId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -276,8 +274,7 @@ export default function LiveSessionPanel({
   }
 
   async function saveVideoSelection() {
-    if (!selectedAccountId || !connected || !selectedVideoId || busy)
-      return;
+    if (!selectedAccountId || !connected || !selectedVideoId || busy) return;
     setBusy('video');
     setError('');
     setNotice('');
@@ -346,16 +343,27 @@ export default function LiveSessionPanel({
     setNotice('');
     try {
       if (action === 'start' && selectedVideoId !== session?.videoId) {
-        const selected = await fetch(`/api/live/sessions/${encodeURIComponent(selectedAccountId)}/video`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoId: selectedVideoId }),
-        });
+        const selected = await fetch(
+          `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/video`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ videoId: selectedVideoId }),
+          },
+        );
         if (!selected.ok) throw new Error(requestError(selected.status, 'บันทึกวิดีโอ'));
       }
       const response = await fetch(
         `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/${action === 'start' ? 'start-auto' : 'stop'}`,
-        { method: 'POST', ...(action === 'start' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: liveTitle.trim() }) } : {}) },
+        {
+          method: 'POST',
+          ...(action === 'start'
+            ? {
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: liveTitle.trim() }),
+              }
+            : {}),
+        },
       );
       if (!response.ok) {
         throw new Error(
@@ -374,15 +382,20 @@ export default function LiveSessionPanel({
       if (action === 'start') {
         setCreatedRoomId('roomId' in data && typeof data.roomId === 'string' ? data.roomId : '');
         setNotice('สร้างห้อง LIVE และเริ่มส่งวิดีโอแล้ว');
-        if ('productsOutcome' in data &&
-          (data.productsOutcome === 'rejected' || data.productsOutcome === 'unverified')) {
-          setError('ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop');
+        if (
+          'productsOutcome' in data &&
+          (data.productsOutcome === 'rejected' || data.productsOutcome === 'unverified')
+        ) {
+          setError(
+            'ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop',
+          );
         }
       } else {
         const roomEnd = 'roomEnd' in data ? data.roomEnd : '';
         if (roomEnd === 'ended') setNotice('หยุดวิดีโอแล้ว TikTok รับคำสั่งปิดห้อง LIVE');
         else if (roomEnd === 'no_room') setNotice('หยุดวิดีโอแล้ว ไม่พบห้อง LIVE ที่เปิดอยู่');
-        else setError('หยุดวิดีโอแล้ว แต่ยังยืนยันการปิดห้อง TikTok ไม่ได้ กรุณาตรวจใน TikTok Shop');
+        else
+          setError('หยุดวิดีโอแล้ว แต่ยังยืนยันการปิดห้อง TikTok ไม่ได้ กรุณาตรวจใน TikTok Shop');
       }
       if (action === 'start') setStatusModalOpen(true);
       void refreshStatus(selectedAccountId);
@@ -509,7 +522,9 @@ export default function LiveSessionPanel({
             </button>
           </form>
           {busy === 'upload' && uploadProgress !== null && (
-            <div role="status">กำลังอัปโหลด {uploadProgress}% — รอให้ระบบบันทึกไฟล์เสร็จก่อนปิดหน้านี้</div>
+            <div role="status">
+              กำลังอัปโหลด {uploadProgress}% — รอให้ระบบบันทึกไฟล์เสร็จก่อนปิดหน้านี้
+            </div>
           )}
           <label>
             วิดีโอที่จะส่ง
@@ -613,7 +628,9 @@ export default function LiveSessionPanel({
           <button
             className="cyber-btn danger"
             type="button"
-            disabled={busy !== '' || (status !== 'starting' && status !== 'live' && !session?.hasOpenRoom)}
+            disabled={
+              busy !== '' || (status !== 'starting' && status !== 'live' && !session?.hasOpenRoom)
+            }
             onClick={() => void changeStream('stop')}
           >
             <Square size={13} fill="currentColor" /> {busy === 'stop' ? 'กำลังลงไลฟ์…' : 'ลงไลฟ์'}

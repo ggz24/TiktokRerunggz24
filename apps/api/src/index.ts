@@ -6,7 +6,11 @@ import { parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
 import { createPgLiveStore, ensureLiveTables } from './live-store.js';
 import { LiveService } from './live-service.js';
 import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
-import { createRapidApiRoomSigner, createTikTokLiveRoom, endTikTokLiveRoom } from '@live-hub/tiktok-client';
+import {
+  createRapidApiRoomSigner,
+  createTikTokLiveRoom,
+  endTikTokLiveRoom,
+} from '@live-hub/tiktok-client';
 
 const port = Number(process.env.API_PORT ?? 4000);
 const databaseUrl =
@@ -64,20 +68,29 @@ if (accountConfig) {
       }
     : undefined;
   const autoRoomEnder = rapidApiKey
-    ? async ({ cookieHeader, userAgent, roomId, streamId }: {
+    ? async ({
+        cookieHeader,
+        userAgent,
+        roomId,
+        streamId,
+      }: {
         cookieHeader: string;
         userAgent?: string;
         roomId?: string | null;
         streamId?: string | null;
-      }) => endTikTokLiveRoom({
-        cookieHeader,
-        studioVersion: process.env.TIKTOK_STUDIO_VERSION ?? '1.36.6',
-        deviceId: process.env.TIKTOK_STUDIO_DEVICE_ID ?? '0',
-        installId: process.env.TIKTOK_STUDIO_INSTALL_ID ?? '0',
-        roomId,
-        streamId,
-        ...(userAgent ? { userAgent } : {}),
-      }, createRapidApiRoomSigner(rapidApiKey))
+      }) =>
+        endTikTokLiveRoom(
+          {
+            cookieHeader,
+            studioVersion: process.env.TIKTOK_STUDIO_VERSION ?? '1.36.6',
+            deviceId: process.env.TIKTOK_STUDIO_DEVICE_ID ?? '0',
+            installId: process.env.TIKTOK_STUDIO_INSTALL_ID ?? '0',
+            roomId,
+            streamId,
+            ...(userAgent ? { userAgent } : {}),
+          },
+          createRapidApiRoomSigner(rapidApiKey),
+        )
     : undefined;
   liveService = new LiveService(
     createPgLiveStore(pool),

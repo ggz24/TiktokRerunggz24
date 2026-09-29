@@ -92,8 +92,10 @@ function safeResult(path: string, result: unknown) {
             : {}),
         };
       }
-      if (path.endsWith('/stop') &&
-        ['ended', 'no_room', 'unavailable', 'unverified'].includes(String(data.roomEnd))) {
+      if (
+        path.endsWith('/stop') &&
+        ['ended', 'no_room', 'unavailable', 'unverified'].includes(String(data.roomEnd))
+      ) {
         return { item, roomEnd: data.roomEnd };
       }
       return { item };

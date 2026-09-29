@@ -159,7 +159,9 @@ const productBody = JSON.stringify({
 });
 const productCurl =
   "curl --url 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/add?msToken=test' " +
-  "-H 'Content-Type: application/json' --data-raw '" + productBody + "'";
+  "-H 'Content-Type: application/json' --data-raw '" +
+  productBody +
+  "'";
 
 test('product cURL preview is authenticated, scoped, and omits signed values', async () => {
   const fixture = accountFixture(async () => null);
@@ -168,11 +170,15 @@ test('product cURL preview is authenticated, scoped, and omits signed values', a
     fixture.config,
   );
   const unauthorized = await app.inject({
-    method: 'POST', url: '/api/v1/live/products/preview', payload: { curl: productCurl },
+    method: 'POST',
+    url: '/api/v1/live/products/preview',
+    payload: { curl: productCurl },
   });
   assert.equal(unauthorized.statusCode, 401);
   const preview = await app.inject({
-    method: 'POST', url: '/api/v1/live/products/preview', headers,
+    method: 'POST',
+    url: '/api/v1/live/products/preview',
+    headers,
     payload: { curl: productCurl },
   });
   assert.equal(preview.statusCode, 200);
@@ -183,7 +189,9 @@ test('product cURL preview is authenticated, scoped, and omits signed values', a
   });
   assert.equal(preview.body.includes('msToken'), false);
   const invalid = await app.inject({
-    method: 'POST', url: '/api/v1/live/products/preview', headers,
+    method: 'POST',
+    url: '/api/v1/live/products/preview',
+    headers,
     payload: { curl: productCurl.replace('shop.tiktok.com', 'example.com') },
   });
   assert.equal(invalid.statusCode, 400);
@@ -191,7 +199,10 @@ test('product cURL preview is authenticated, scoped, and omits signed values', a
 });
 
 test('product add uses the selected encrypted account session only after an explicit send', async () => {
-  const fixture = accountFixture(async () => ({ userId: '1234567890123456789', username: 'sample.user' }));
+  const fixture = accountFixture(async () => ({
+    userId: '1234567890123456789',
+    username: 'sample.user',
+  }));
   let sends = 0;
   const app = createApp(
     { postgres: async () => {}, redis: async () => {}, worker: async () => true },
@@ -205,24 +216,32 @@ test('product add uses the selected encrypted account session only after an expl
     },
   );
   const imported = await app.inject({
-    method: 'POST', url: '/api/v1/accounts/import', headers,
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
     payload: { alias: 'Sample', curl: syntheticCurl },
   });
   assert.equal(imported.statusCode, 201);
   const accountId = imported.json().item.id;
   const preview = await app.inject({
-    method: 'POST', url: '/api/v1/live/products/preview', headers,
+    method: 'POST',
+    url: '/api/v1/live/products/preview',
+    headers,
     payload: { curl: productCurl, accountId },
   });
   assert.equal(preview.statusCode, 200);
   assert.equal(sends, 0);
   const sent = await app.inject({
-    method: 'POST', url: '/api/v1/live/products/add', headers,
+    method: 'POST',
+    url: '/api/v1/live/products/add',
+    headers,
     payload: { curl: productCurl, accountId },
   });
   assert.equal(sent.statusCode, 200);
   assert.deepEqual(sent.json(), {
-    outcome: 'accepted', roomId: '7681699623552076564', productCount: 1,
+    outcome: 'accepted',
+    roomId: '7681699623552076564',
+    productCount: 1,
   });
   assert.equal(sends, 1);
   await app.close();
@@ -233,21 +252,38 @@ test('named product sets stay owner-scoped and only send after the explicit acti
   const records: Array<ProductSetItem & { ownerId: string; curl: string }> = [];
   const setId = '11111111-1111-4111-8111-111111111111';
   const now = '2026-09-29T00:00:00.000Z';
+  const publicItem = (row: ProductSetItem): ProductSetItem => ({
+    id: row.id,
+    name: row.name,
+    accountId: row.accountId,
+    roomId: row.roomId,
+    productIds: row.productIds,
+    hasCookie: row.hasCookie,
+    autoApply: row.autoApply,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  });
   const store: ProductSetStore = {
-    list: async (ownerId) => records.filter((item) => item.ownerId === ownerId).map(({ ownerId: _owner, curl: _curl, ...item }) => item),
-    find: async (ownerId, id) => records.find((item) => item.ownerId === ownerId && item.id === id) ?? null,
+    list: async (ownerId) => records.filter((item) => item.ownerId === ownerId).map(publicItem),
+    find: async (ownerId, id) =>
+      records.find((item) => item.ownerId === ownerId && item.id === id) ?? null,
     create: async (ownerId, input: ProductSetInput) => {
-      const item = { id: setId, ownerId, ...input, autoApply: false, createdAt: now, updatedAt: now };
+      const item = {
+        id: setId,
+        ownerId,
+        ...input,
+        autoApply: false,
+        createdAt: now,
+        updatedAt: now,
+      };
       records.push(item);
-      const { ownerId: _owner, curl: _curl, ...safe } = item;
-      return safe;
+      return publicItem(item);
     },
     update: async (ownerId, id, input) => {
       const item = records.find((row) => row.ownerId === ownerId && row.id === id);
       if (!item) return null;
       Object.assign(item, input);
-      const { ownerId: _owner, curl: _curl, ...safe } = item;
-      return safe;
+      return publicItem(item);
     },
     delete: async (ownerId, id) => {
       const index = records.findIndex((item) => item.ownerId === ownerId && item.id === id);
@@ -279,8 +315,17 @@ test('named product sets stay owner-scoped and only send after the explicit acti
   );
   const savedCurl = `${productCurl} -b 'sessionid=product-test'`;
   const createPayload = { name: 'ชุดสินค้าเช้า', curl: savedCurl, accountId: null };
-  assert.equal((await app.inject({ method: 'POST', url: '/api/v1/live/product-sets', payload: createPayload })).statusCode, 401);
-  const created = await app.inject({ method: 'POST', url: '/api/v1/live/product-sets', headers, payload: createPayload });
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/v1/live/product-sets', payload: createPayload }))
+      .statusCode,
+    401,
+  );
+  const created = await app.inject({
+    method: 'POST',
+    url: '/api/v1/live/product-sets',
+    headers,
+    payload: createPayload,
+  });
   assert.equal(created.statusCode, 201);
   assert.equal(created.json().item.name, createPayload.name);
   assert.equal(created.body.includes('sessionid'), false);
@@ -290,42 +335,94 @@ test('named product sets stay owner-scoped and only send after the explicit acti
   assert.equal(listed.json().items.length, 1);
   assert.equal(listed.body.includes('sessionid'), false);
   const otherHeaders = { ...headers, 'x-livehub-owner': 'owner-2' };
-  assert.equal((await app.inject({ method: 'GET', url: '/api/v1/live/product-sets', headers: otherHeaders })).json().items.length, 0);
-  assert.equal((await app.inject({ method: 'POST', url: `/api/v1/live/product-sets/${setId}/send`, headers: otherHeaders })).statusCode, 404);
-  const updated = await app.inject({ method: 'PATCH', url: `/api/v1/live/product-sets/${setId}`, headers, payload: { name: 'ชุดสินค้าใหม่' } });
+  assert.equal(
+    (
+      await app.inject({ method: 'GET', url: '/api/v1/live/product-sets', headers: otherHeaders })
+    ).json().items.length,
+    0,
+  );
+  assert.equal(
+    (
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/live/product-sets/${setId}/send`,
+        headers: otherHeaders,
+      })
+    ).statusCode,
+    404,
+  );
+  const updated = await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/live/product-sets/${setId}`,
+    headers,
+    payload: { name: 'ชุดสินค้าใหม่' },
+  });
   assert.equal(updated.statusCode, 200);
   assert.equal(updated.json().item.name, 'ชุดสินค้าใหม่');
   assert.equal(sends, 0);
-  const sent = await app.inject({ method: 'POST', url: `/api/v1/live/product-sets/${setId}/send`, headers });
+  const sent = await app.inject({
+    method: 'POST',
+    url: `/api/v1/live/product-sets/${setId}/send`,
+    headers,
+  });
   assert.equal(sent.statusCode, 200);
   assert.equal(sent.json().outcome, 'accepted');
   assert.equal(sends, 1);
-  assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/live/product-sets/${setId}`, headers: otherHeaders })).statusCode, 404);
-  assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/live/product-sets/${setId}`, headers })).statusCode, 204);
-  assert.equal((await app.inject({ method: 'GET', url: '/api/v1/live/product-sets', headers })).json().items.length, 0);
+  assert.equal(
+    (
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/v1/live/product-sets/${setId}`,
+        headers: otherHeaders,
+      })
+    ).statusCode,
+    404,
+  );
+  assert.equal(
+    (await app.inject({ method: 'DELETE', url: `/api/v1/live/product-sets/${setId}`, headers }))
+      .statusCode,
+    204,
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/v1/live/product-sets', headers })).json().items
+      .length,
+    0,
+  );
   await app.close();
 });
 
 test('a saved set waits before LIVE and targets the new room with its account session', async () => {
-  const fixture = accountFixture(async () => ({ userId: '1234567890123456789', username: 'sample.user' }));
+  const fixture = accountFixture(async () => ({
+    userId: '1234567890123456789',
+    username: 'sample.user',
+  }));
   const setId = '11111111-1111-4111-8111-111111111111';
   const roomId = '7690886057457437492';
   let currentRoomId: string | null = null;
-  let saved: ProductSetItem & { curl: string };
+  const state: { saved?: ProductSetItem & { curl: string } } = {};
   const store: ProductSetStore = {
-    list: async () => saved ? [saved] : [],
-    find: async (_owner, id) => id === setId ? saved : null,
-    create: async () => { throw new Error('not used'); },
+    list: async () => (state.saved ? [state.saved] : []),
+    find: async (_owner, id) => (id === setId ? (state.saved ?? null) : null),
+    create: async () => {
+      throw new Error('not used');
+    },
     update: async () => null,
     delete: async () => false,
-    selectForLive: async () => { saved.autoApply = true; },
+    selectForLive: async () => {
+      if (state.saved) state.saved.autoApply = true;
+    },
   };
   const service = {
     currentRoomId: async () => currentRoomId,
-    startAuto: async () => ({ roomId, session: {
-      accountId: saved.accountId, status: 'starting', hasRtmpConfig: true,
-      hasOpenRoom: true,
-    } }),
+    startAuto: async () => ({
+      roomId,
+      session: {
+        accountId: state.saved?.accountId,
+        status: 'starting',
+        hasRtmpConfig: true,
+        hasOpenRoom: true,
+      },
+    }),
     stopAll: async () => {},
   } as unknown as LiveService;
   let sends = 0;
@@ -342,27 +439,43 @@ test('a saved set waits before LIVE and targets the new room with its account se
     },
     store,
   );
-  const imported = await app.inject({ method: 'POST', url: '/api/v1/accounts/import', headers,
-    payload: { alias: 'Sample', curl: syntheticCurl } });
+  const imported = await app.inject({
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
+    payload: { alias: 'Sample', curl: syntheticCurl },
+  });
   assert.equal(imported.statusCode, 201);
   const accountId = imported.json().item.id;
-  saved = { id: setId, name: 'Saved set', accountId, roomId: '',
-    productIds: ['1732490821698225758'], hasCookie: true, autoApply: false,
-    createdAt: '2026-09-29T00:00:00.000Z', updatedAt: '2026-09-29T00:00:00.000Z',
-    curl: `${productCurl.replace('7681699623552076564', '')} -b 'sessionid=fake-session-only; oec_lucifer=shop-only'` };
+  state.saved = {
+    id: setId,
+    name: 'Saved set',
+    accountId,
+    roomId: '',
+    productIds: ['1732490821698225758'],
+    hasCookie: true,
+    autoApply: false,
+    createdAt: '2026-09-29T00:00:00.000Z',
+    updatedAt: '2026-09-29T00:00:00.000Z',
+    curl: `${productCurl.replace('7681699623552076564', '')} -b 'sessionid=fake-session-only; oec_lucifer=shop-only'`,
+  };
   const sendUrl = `/api/v1/live/product-sets/${setId}/send`;
   const queued = await app.inject({ method: 'POST', url: sendUrl, headers });
   assert.equal(queued.statusCode, 200);
   assert.equal(queued.json().outcome, 'queued');
-  assert.equal(saved.autoApply, true);
+  assert.equal(state.saved.autoApply, true);
   assert.equal(sends, 0);
   currentRoomId = roomId;
   const sent = await app.inject({ method: 'POST', url: sendUrl, headers });
   assert.equal(sent.statusCode, 200);
   assert.equal(sent.json().roomId, roomId);
   assert.equal(sends, 1);
-  const started = await app.inject({ method: 'POST',
-    url: `/api/v1/live/sessions/${accountId}/start-auto`, headers, payload: { title: 'Test' } });
+  const started = await app.inject({
+    method: 'POST',
+    url: `/api/v1/live/sessions/${accountId}/start-auto`,
+    headers,
+    payload: { title: 'Test' },
+  });
   assert.equal(started.statusCode, 200);
   assert.equal(started.json().productsOutcome, 'accepted');
   assert.equal(sends, 2);

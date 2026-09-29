@@ -19,8 +19,12 @@ type ProductSet = Preview & {
 
 async function responseError(response: Response): Promise<string> {
   const result: unknown = await response.json().catch(() => null);
-  return result && typeof result === 'object' && 'error' in result && typeof result.error === 'string'
-    ? result.error : 'ดำเนินการไม่สำเร็จ กรุณาลองอีกครั้ง';
+  return result &&
+    typeof result === 'object' &&
+    'error' in result &&
+    typeof result.error === 'string'
+    ? result.error
+    : 'ดำเนินการไม่สำเร็จ กรุณาลองอีกครั้ง';
 }
 
 export default function ProductCurlPanel() {
@@ -39,31 +43,44 @@ export default function ProductCurlPanel() {
     const response = await fetch('/api/live/product-sets', { cache: 'no-store' });
     if (!response.ok) throw new Error(await responseError(response));
     const result: unknown = await response.json();
-    if (!result || typeof result !== 'object' || !('items' in result) ||
-        !Array.isArray(result.items)) throw new Error('อ่านชุดสินค้าไม่สำเร็จ');
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      !('items' in result) ||
+      !Array.isArray(result.items)
+    )
+      throw new Error('อ่านชุดสินค้าไม่สำเร็จ');
     setSets(result.items as ProductSet[]);
   }
 
   useEffect(() => {
     let active = true;
     fetch('/api/accounts', { cache: 'no-store' })
-      .then((response) => response.ok ? response.json() : { items: [] })
+      .then((response) => (response.ok ? response.json() : { items: [] }))
       .then((result) => {
         if (active && Array.isArray(result.items)) {
-          setAccounts(result.items.filter((item: Account) => item.verificationStatus === 'connected'));
+          setAccounts(
+            result.items.filter((item: Account) => item.verificationStatus === 'connected'),
+          );
         }
       })
-      .catch(() => { if (active) setAccounts([]); });
+      .catch(() => {
+        if (active) setAccounts([]);
+      });
     fetch('/api/live/product-sets', { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error(await responseError(response));
         return response.json();
       })
-      .then((result) => { if (active && Array.isArray(result.items)) setSets(result.items); })
+      .then((result) => {
+        if (active && Array.isArray(result.items)) setSets(result.items);
+      })
       .catch((caught) => {
         if (active) setError(caught instanceof Error ? caught.message : 'อ่านชุดสินค้าไม่สำเร็จ');
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
   function resetEditor() {
@@ -82,7 +99,9 @@ export default function ProductCurlPanel() {
     setPreview({ roomId: item.roomId, productIds: item.productIds, hasCookie: item.hasCookie });
     setError('');
     setNotice('แก้ชื่อได้ทันที หาก cURL หมดอายุ ให้วาง cURL ใหม่แล้วตรวจรายการก่อนบันทึก');
-    document.getElementById('product-set-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document
+      .getElementById('product-set-editor')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   async function previewCurl() {
@@ -97,7 +116,7 @@ export default function ProductCurlPanel() {
         body: JSON.stringify({ action: 'preview', curl }),
       });
       if (!response.ok) throw new Error(await responseError(response));
-      const result = await response.json() as Preview;
+      const result = (await response.json()) as Preview;
       if (typeof result.roomId !== 'string' || !Array.isArray(result.productIds)) {
         throw new Error('อ่านรายการสินค้าไม่สำเร็จ');
       }
@@ -112,11 +131,21 @@ export default function ProductCurlPanel() {
 
   async function saveSet() {
     if (busy) return;
-    if (!name.trim()) { setError('ใส่ชื่อชุดสินค้า'); return; }
-    if (!editingId && !curl.trim()) { setError('วาง cURL สำหรับชุดสินค้า'); return; }
-    if (curl.trim() && !preview) { setError('ตรวจรายการสินค้าจาก cURL ก่อนบันทึก'); return; }
+    if (!name.trim()) {
+      setError('ใส่ชื่อชุดสินค้า');
+      return;
+    }
+    if (!editingId && !curl.trim()) {
+      setError('วาง cURL สำหรับชุดสินค้า');
+      return;
+    }
+    if (curl.trim() && !preview) {
+      setError('ตรวจรายการสินค้าจาก cURL ก่อนบันทึก');
+      return;
+    }
     if (preview && !preview.hasCookie && !accountId) {
-      setError('เลือกบัญชีที่เชื่อมต่อไว้สำหรับ cURL ที่ไม่มี Cookie'); return;
+      setError('เลือกบัญชีที่เชื่อมต่อไว้สำหรับ cURL ที่ไม่มี Cookie');
+      return;
     }
     setBusy('save');
     setError('');
@@ -127,8 +156,11 @@ export default function ProductCurlPanel() {
         {
           method: editingId ? 'PATCH' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name.trim(), accountId: accountId || null,
-            ...(curl.trim() ? { curl } : {}) }),
+          body: JSON.stringify({
+            name: name.trim(),
+            accountId: accountId || null,
+            ...(curl.trim() ? { curl } : {}),
+          }),
         },
       );
       if (!response.ok) throw new Error(await responseError(response));
@@ -144,8 +176,16 @@ export default function ProductCurlPanel() {
 
   async function sendCurl() {
     if (busy || !curl.trim() || !preview) return;
-    if (!preview.hasCookie && !accountId) { setError('เลือกบัญชีที่เชื่อมต่อไว้'); return; }
-    if (!window.confirm(`ส่งสินค้า ${preview.productIds.length} รายการเข้า TikTok Shop Streamer Desktop จริงหรือไม่?`)) return;
+    if (!preview.hasCookie && !accountId) {
+      setError('เลือกบัญชีที่เชื่อมต่อไว้');
+      return;
+    }
+    if (
+      !window.confirm(
+        `ส่งสินค้า ${preview.productIds.length} รายการเข้า TikTok Shop Streamer Desktop จริงหรือไม่?`,
+      )
+    )
+      return;
     setBusy('send');
     setError('');
     setNotice('');
@@ -156,10 +196,12 @@ export default function ProductCurlPanel() {
         body: JSON.stringify({ action: 'send', curl, ...(accountId ? { accountId } : {}) }),
       });
       if (!response.ok) throw new Error(await responseError(response));
-      const result = await response.json() as { outcome: string };
-      setNotice(result.outcome === 'accepted'
-        ? 'TikTok Shop ตอบรับคำขอแล้ว ตรวจรายการใน Streamer Desktop อีกครั้ง'
-        : 'ส่งคำขอแล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop');
+      const result = (await response.json()) as { outcome: string };
+      setNotice(
+        result.outcome === 'accepted'
+          ? 'TikTok Shop ตอบรับคำขอแล้ว ตรวจรายการใน Streamer Desktop อีกครั้ง'
+          : 'ส่งคำขอแล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop',
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'ส่งสินค้าไม่สำเร็จ');
     } finally {
@@ -168,19 +210,27 @@ export default function ProductCurlPanel() {
   }
 
   async function sendSaved(item: ProductSet) {
-    if (busy || !window.confirm(`ส่งชุด “${item.name}” (${item.productIds.length} รายการ) เข้า TikTok Shop Streamer Desktop จริงหรือไม่?`)) return;
+    if (
+      busy ||
+      !window.confirm(
+        `ส่งชุด “${item.name}” (${item.productIds.length} รายการ) เข้า TikTok Shop Streamer Desktop จริงหรือไม่?`,
+      )
+    )
+      return;
     setBusy(item.id);
     setError('');
     setNotice('');
     try {
       const response = await fetch(`/api/live/product-sets/${item.id}/send`, { method: 'POST' });
       if (!response.ok) throw new Error(await responseError(response));
-      const result = await response.json() as { outcome: string };
-      setNotice(result.outcome === 'queued'
-        ? `บันทึกชุด “${item.name}” เพื่อส่งเข้าห้องใหม่เมื่อกดเริ่มไลฟ์`
-        : result.outcome === 'accepted'
-        ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
-        : `ส่งชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`);
+      const result = (await response.json()) as { outcome: string };
+      setNotice(
+        result.outcome === 'queued'
+          ? `บันทึกชุด “${item.name}” เพื่อส่งเข้าห้องใหม่เมื่อกดเริ่มไลฟ์`
+          : result.outcome === 'accepted'
+            ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
+            : `ส่งชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`,
+      );
       await loadSets();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'ส่งชุดสินค้าไม่สำเร็จ');
@@ -209,33 +259,74 @@ export default function ProductCurlPanel() {
 
   return (
     <section className="cyber-panel">
-      <div className="cyber-panel-title"><span className="cyber-spark">▪</span> จัดการชุดสินค้า</div>
+      <div className="cyber-panel-title">
+        <span className="cyber-spark">▪</span> จัดการชุดสินค้า
+      </div>
       <div className="cyber-form-section">
-        <p>บันทึกชุดจาก cURL ของ <code>live_product/add</code> แล้วกดส่งเข้า TikTok Shop Streamer Desktop เมื่อต้องการ</p>
+        <p>
+          บันทึกชุดจาก cURL ของ <code>live_product/add</code> แล้วกดส่งเข้า TikTok Shop Streamer
+          Desktop เมื่อต้องการ
+        </p>
         <div className="cyber-product-set-list">
           {sets.length === 0 && <p>ยังไม่มีชุดสินค้าที่บันทึกไว้</p>}
           {sets.map((item) => (
             <div className="cyber-product-set-row" key={item.id}>
-              <div><strong>{item.name}</strong><small>{item.productIds.length} รายการ · {item.roomId || 'ก่อนเริ่ม LIVE'}</small></div>
+              <div>
+                <strong>{item.name}</strong>
+                <small>
+                  {item.productIds.length} รายการ · {item.roomId || 'ก่อนเริ่ม LIVE'}
+                </small>
+              </div>
               <div className="cyber-product-set-actions">
-                <button type="button" className="cyber-btn green" disabled={busy !== ''} onClick={() => void sendSaved(item)}>
+                <button
+                  type="button"
+                  className="cyber-btn green"
+                  disabled={busy !== ''}
+                  onClick={() => void sendSaved(item)}
+                >
                   {busy === item.id ? 'กำลังดำเนินการ…' : '⚡ ส่งเข้า LIVE'}
                 </button>
-                <button type="button" className="cyber-btn secondary" disabled={busy !== ''} onClick={() => editSet(item)}>✎ แก้ไข</button>
-                <button type="button" className="cyber-btn danger" disabled={busy !== ''} onClick={() => void deleteSet(item)}>ลบ</button>
+                <button
+                  type="button"
+                  className="cyber-btn secondary"
+                  disabled={busy !== ''}
+                  onClick={() => editSet(item)}
+                >
+                  ✎ แก้ไข
+                </button>
+                <button
+                  type="button"
+                  className="cyber-btn danger"
+                  disabled={busy !== ''}
+                  onClick={() => void deleteSet(item)}
+                >
+                  ลบ
+                </button>
               </div>
             </div>
           ))}
         </div>
         <div id="product-set-editor" className="cyber-product-set-editor">
           <h3>{editingId ? 'แก้ไขชุดสินค้า' : 'เพิ่มชุดสินค้า'}</h3>
-          <label className="cyber-field">ชื่อชุดสินค้า
-            <input className="cyber-input" value={name} maxLength={80} disabled={busy !== ''}
-              onChange={(event) => setName(event.target.value)} placeholder="เช่น สินค้าสำหรับ LIVE วันนี้" />
+          <label className="cyber-field">
+            ชื่อชุดสินค้า
+            <input
+              className="cyber-input"
+              value={name}
+              maxLength={80}
+              disabled={busy !== ''}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="เช่น สินค้าสำหรับ LIVE วันนี้"
+            />
           </label>
-          <label className="cyber-field">บัญชี TikTok ที่เชื่อมต่อไว้
-            <select className="cyber-select" value={accountId} disabled={busy !== ''}
-              onChange={(event) => setAccountId(event.target.value)}>
+          <label className="cyber-field">
+            บัญชี TikTok ที่เชื่อมต่อไว้
+            <select
+              className="cyber-select"
+              value={accountId}
+              disabled={busy !== ''}
+              onChange={(event) => setAccountId(event.target.value)}
+            >
               <option value="">ใช้ Cookie ใน cURL</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -244,30 +335,98 @@ export default function ProductCurlPanel() {
               ))}
             </select>
           </label>
-          <label className="cyber-field">cURL จาก TikTok Shop Streamer Desktop
-            <textarea className="cyber-textarea" rows={9} value={curl} disabled={busy !== ''}
-              onChange={(event) => { setCurl(event.target.value); setPreview(null); setNotice(''); }}
-              placeholder={editingId ? 'ปล่อยว่างเพื่อใช้ cURL เดิม หรือวาง cURL ใหม่เพื่อเปลี่ยนรายการสินค้า' : "curl --url 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/add?...' ..."} />
+          <label className="cyber-field">
+            cURL จาก TikTok Shop Streamer Desktop
+            <textarea
+              className="cyber-textarea"
+              rows={9}
+              value={curl}
+              disabled={busy !== ''}
+              onChange={(event) => {
+                setCurl(event.target.value);
+                setPreview(null);
+                setNotice('');
+              }}
+              placeholder={
+                editingId
+                  ? 'ปล่อยว่างเพื่อใช้ cURL เดิม หรือวาง cURL ใหม่เพื่อเปลี่ยนรายการสินค้า'
+                  : "curl --url 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/add?...' ..."
+              }
+            />
           </label>
-          <p>cURL ที่บันทึกเข้ารหัสไว้และไม่แสดงกลับบนหน้าเว็บ เมื่อ token หมดอายุ ให้กดแก้ไขแล้ววาง cURL ใหม่</p>
+          <p>
+            cURL ที่บันทึกเข้ารหัสไว้และไม่แสดงกลับบนหน้าเว็บ เมื่อ token หมดอายุ ให้กดแก้ไขแล้ววาง
+            cURL ใหม่
+          </p>
           <div className="cyber-product-set-actions">
-            <button className="cyber-btn cyan" type="button" disabled={!curl.trim() || busy !== ''}
-              onClick={() => void previewCurl()}>{busy === 'preview' ? 'กำลังตรวจ…' : 'ตรวจรายการสินค้า'}</button>
-            <button className="cyber-btn pink" type="button" disabled={busy !== '' || !name.trim() || (!editingId && !preview) || (curl.trim() !== '' && !preview)}
-              onClick={() => void saveSet()}>{busy === 'save' ? 'กำลังบันทึก…' : editingId ? 'บันทึกการแก้ไข' : 'บันทึกชุดสินค้า'}</button>
-            {curl.trim() && preview && <button className="cyber-btn green" type="button" disabled={busy !== '' || (!preview.hasCookie && !accountId)}
-              onClick={() => void sendCurl()}>{busy === 'send' ? 'กำลังส่ง…' : 'ส่ง cURL นี้เข้า LIVE'}</button>}
-            {editingId && <button className="cyber-btn secondary" type="button" disabled={busy !== ''} onClick={resetEditor}>ยกเลิกแก้ไข</button>}
+            <button
+              className="cyber-btn cyan"
+              type="button"
+              disabled={!curl.trim() || busy !== ''}
+              onClick={() => void previewCurl()}
+            >
+              {busy === 'preview' ? 'กำลังตรวจ…' : 'ตรวจรายการสินค้า'}
+            </button>
+            <button
+              className="cyber-btn pink"
+              type="button"
+              disabled={
+                busy !== '' ||
+                !name.trim() ||
+                (!editingId && !preview) ||
+                (curl.trim() !== '' && !preview)
+              }
+              onClick={() => void saveSet()}
+            >
+              {busy === 'save' ? 'กำลังบันทึก…' : editingId ? 'บันทึกการแก้ไข' : 'บันทึกชุดสินค้า'}
+            </button>
+            {curl.trim() && preview && (
+              <button
+                className="cyber-btn green"
+                type="button"
+                disabled={busy !== '' || (!preview.hasCookie && !accountId)}
+                onClick={() => void sendCurl()}
+              >
+                {busy === 'send' ? 'กำลังส่ง…' : 'ส่ง cURL นี้เข้า LIVE'}
+              </button>
+            )}
+            {editingId && (
+              <button
+                className="cyber-btn secondary"
+                type="button"
+                disabled={busy !== ''}
+                onClick={resetEditor}
+              >
+                ยกเลิกแก้ไข
+              </button>
+            )}
           </div>
-          {preview && <div className="cyber-product-set-preview">
-            <strong>พบสินค้า {preview.productIds.length} รายการ · {preview.roomId || 'ก่อนเริ่ม LIVE'}</strong>
-            <span>{preview.productIds.join(', ')}</span>
-            {!preview.hasCookie && !accountId && <span role="alert">เลือกบัญชีที่เชื่อมต่อไว้ก่อนบันทึกหรือส่ง</span>}
-          </div>}
+          {preview && (
+            <div className="cyber-product-set-preview">
+              <strong>
+                พบสินค้า {preview.productIds.length} รายการ · {preview.roomId || 'ก่อนเริ่ม LIVE'}
+              </strong>
+              <span>{preview.productIds.join(', ')}</span>
+              {!preview.hasCookie && !accountId && (
+                <span role="alert">เลือกบัญชีที่เชื่อมต่อไว้ก่อนบันทึกหรือส่ง</span>
+              )}
+            </div>
+          )}
         </div>
-        {error && <p role="alert" className="cyber-product-set-message">{error}</p>}
-        {notice && <p role="status" className="cyber-product-set-message">{notice}</p>}
-        <p>คำขอนี้เพิ่มสินค้าเข้ารายการใน Streamer Desktop การปักแสดงสินค้าเด่นหนึ่งชิ้นบนจอ LIVE ใช้คำสั่งอีกชนิด</p>
+        {error && (
+          <p role="alert" className="cyber-product-set-message">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p role="status" className="cyber-product-set-message">
+            {notice}
+          </p>
+        )}
+        <p>
+          คำขอนี้เพิ่มสินค้าเข้ารายการใน Streamer Desktop การปักแสดงสินค้าเด่นหนึ่งชิ้นบนจอ LIVE
+          ใช้คำสั่งอีกชนิด
+        </p>
       </div>
     </section>
   );

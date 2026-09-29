@@ -37,8 +37,12 @@ const mockClient = createTikTokClient(createMockTransport());
 // TikTok Shop may require cookies that are absent from a general TikTok account import.
 // Use the captured Shop session only when it belongs to the selected account.
 function shopCookieForAccount(shopCookie: string | undefined, accountCookie: string): string {
-  const sessionId = (header: string) => header.split(';').map((part) => part.trim())
-    .find((part) => part.startsWith('sessionid='))?.slice('sessionid='.length);
+  const sessionId = (header: string) =>
+    header
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith('sessionid='))
+      ?.slice('sessionid='.length);
   const accountSession = sessionId(accountCookie);
   return accountSession && shopCookie && sessionId(shopCookie) === accountSession
     ? shopCookie
@@ -143,8 +147,11 @@ export function createApp(
     const values = body as Record<string, unknown>;
     if (Object.keys(values).some((key) => !['curl', 'accountId'].includes(key))) return null;
     if (typeof values.curl !== 'string' || values.curl.length > 100_000) return null;
-    if (values.accountId !== undefined &&
-        (typeof values.accountId !== 'string' || !validAccountId(values.accountId))) return null;
+    if (
+      values.accountId !== undefined &&
+      (typeof values.accountId !== 'string' || !validAccountId(values.accountId))
+    )
+      return null;
     try {
       return {
         parsed: parseLiveProductAddCurl(values.curl),
@@ -157,7 +164,8 @@ export function createApp(
 
   app.post('/api/v1/live/products/preview', { bodyLimit: 110_000 }, async (request, reply) => {
     if (!accountConfig) return reply.status(503).send({ error: 'Product import is unavailable.' });
-    if (!ownerFromHeaders(request.headers)) return reply.status(401).send({ error: 'Unauthorized.' });
+    if (!ownerFromHeaders(request.headers))
+      return reply.status(401).send({ error: 'Unauthorized.' });
     const input = productCurlFromBody(request.body);
     if (!input) return reply.status(400).send({ error: 'Invalid product-add cURL.' });
     return {
@@ -176,11 +184,17 @@ export function createApp(
     if (input.accountId && liveService) {
       try {
         const roomId = await liveService.currentRoomId(ownerId, input.accountId);
-        if (!roomId) return reply.status(409).send({ error: 'Save this as a product set and queue it before LIVE.' });
+        if (!roomId)
+          return reply
+            .status(409)
+            .send({ error: 'Save this as a product set and queue it before LIVE.' });
         const account = await accountConfig.store.findEncrypted(ownerId, input.accountId);
         if (!account) return reply.status(404).send({ error: 'Account not found.' });
         const cookieHeader = decryptAccountCookie(
-          account, accountConfig.encryptionKey, ownerId, input.accountId,
+          account,
+          accountConfig.encryptionKey,
+          ownerId,
+          input.accountId,
         );
         const outcome = await productAddSender(
           forLiveProductRoom(input.parsed, roomId),
@@ -201,7 +215,10 @@ export function createApp(
         const encrypted = await accountConfig.store.findEncrypted(ownerId, input.accountId);
         if (!encrypted) return reply.status(404).send({ error: 'Account not found.' });
         cookieHeader = decryptAccountCookie(
-          encrypted, accountConfig.encryptionKey, ownerId, input.accountId,
+          encrypted,
+          accountConfig.encryptionKey,
+          ownerId,
+          input.accountId,
         );
       } catch {
         return reply.status(503).send({ error: 'Account session is unavailable.' });
@@ -209,7 +226,11 @@ export function createApp(
     }
     try {
       const outcome = await productAddSender(input.parsed, cookieHeader);
-      const result = { outcome, roomId: input.parsed.roomId, productCount: input.parsed.productIds.length };
+      const result = {
+        outcome,
+        roomId: input.parsed.roomId,
+        productCount: input.parsed.productIds.length,
+      };
       if (outcome === 'rejected') return reply.status(422).send(result);
       if (outcome === 'unverified') return reply.status(202).send(result);
       return result;
@@ -221,15 +242,20 @@ export function createApp(
   function productSetBody(body: unknown, previous?: ProductSetInput): ProductSetInput | null {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
     const values = body as Record<string, unknown>;
-    if (Object.keys(values).some((key) => !['name', 'curl', 'accountId'].includes(key))) return null;
+    if (Object.keys(values).some((key) => !['name', 'curl', 'accountId'].includes(key)))
+      return null;
     if (!validAlias(values.name)) return null;
-    if (values.curl !== undefined && (typeof values.curl !== 'string' || values.curl.length > 100_000)) return null;
+    if (
+      values.curl !== undefined &&
+      (typeof values.curl !== 'string' || values.curl.length > 100_000)
+    )
+      return null;
     const curl = values.curl ?? previous?.curl;
     if (typeof curl !== 'string') return null;
-    const accountId = values.accountId === undefined
-      ? previous?.accountId ?? null
-      : values.accountId;
-    if (accountId !== null && (typeof accountId !== 'string' || !validAccountId(accountId))) return null;
+    const accountId =
+      values.accountId === undefined ? (previous?.accountId ?? null) : values.accountId;
+    if (accountId !== null && (typeof accountId !== 'string' || !validAccountId(accountId)))
+      return null;
     try {
       const parsed = parseLiveProductAddCurl(curl);
       if (!parsed.cookieHeader && !accountId) return null;
@@ -251,16 +277,15 @@ export function createApp(
     return Boolean(await accountConfig.store.findEncrypted(ownerId, accountId));
   }
 
-  async function sendSavedSetToRoom(
-    ownerId: string,
-    saved: ProductSetInput,
-    roomId: string,
-  ) {
+  async function sendSavedSetToRoom(ownerId: string, saved: ProductSetInput, roomId: string) {
     if (!accountConfig || !saved.accountId) throw new Error('A connected account is required.');
     const account = await accountConfig.store.findEncrypted(ownerId, saved.accountId);
     if (!account) throw new Error('Account not found.');
     const cookieHeader = decryptAccountCookie(
-      account, accountConfig.encryptionKey, ownerId, saved.accountId,
+      account,
+      accountConfig.encryptionKey,
+      ownerId,
+      saved.accountId,
     );
     const parsed = forLiveProductRoom(parseLiveProductAddCurl(saved.curl), roomId);
     return productAddSender(parsed, shopCookieForAccount(parsed.cookieHeader, cookieHeader));
@@ -284,7 +309,7 @@ export function createApp(
     const input = productSetBody(request.body);
     if (!input) return reply.status(400).send({ error: 'Invalid product set.' });
     try {
-      if (!await selectedAccountExists(ownerId, input.accountId)) {
+      if (!(await selectedAccountExists(ownerId, input.accountId))) {
         return reply.status(404).send({ error: 'Account not found.' });
       }
       return reply.status(201).send({ item: await productSetStore.create(ownerId, input) });
@@ -304,7 +329,7 @@ export function createApp(
       if (!previous) return reply.status(404).send({ error: 'Product set not found.' });
       const input = productSetBody(request.body, previous);
       if (!input) return reply.status(400).send({ error: 'Invalid product set.' });
-      if (!await selectedAccountExists(ownerId, input.accountId)) {
+      if (!(await selectedAccountExists(ownerId, input.accountId))) {
         return reply.status(404).send({ error: 'Account not found.' });
       }
       const item = await productSetStore.update(ownerId, id, input);
@@ -322,14 +347,17 @@ export function createApp(
     if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid product set ID.' });
     try {
       const deleted = await productSetStore.delete(ownerId, id);
-      return deleted ? reply.status(204).send() : reply.status(404).send({ error: 'Product set not found.' });
+      return deleted
+        ? reply.status(204).send()
+        : reply.status(404).send({ error: 'Product set not found.' });
     } catch {
       return reply.status(503).send({ error: 'Product set could not be deleted.' });
     }
   });
 
   app.post('/api/v1/live/product-sets/:id/send', async (request, reply) => {
-    if (!productSetStore || !accountConfig) return reply.status(503).send({ error: 'Product sets are unavailable.' });
+    if (!productSetStore || !accountConfig)
+      return reply.status(503).send({ error: 'Product sets are unavailable.' });
     const ownerId = ownerFromHeaders(request.headers);
     if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
     const { id } = request.params as { id: string };
@@ -352,11 +380,15 @@ export function createApp(
       const parsed = parseLiveProductAddCurl(saved.curl);
       let cookieHeader = parsed.cookieHeader;
       if (!cookieHeader) {
-        if (!saved.accountId) return reply.status(400).send({ error: 'Select a connected account.' });
+        if (!saved.accountId)
+          return reply.status(400).send({ error: 'Select a connected account.' });
         const account = await accountConfig.store.findEncrypted(ownerId, saved.accountId);
         if (!account) return reply.status(404).send({ error: 'Account not found.' });
         cookieHeader = decryptAccountCookie(
-          account, accountConfig.encryptionKey, ownerId, saved.accountId,
+          account,
+          accountConfig.encryptionKey,
+          ownerId,
+          saved.accountId,
         );
       }
       const outcome = await productAddSender(parsed, cookieHeader);
@@ -558,8 +590,8 @@ export function createApp(
     }
   });
 
-  if (liveService) registerLiveRoutes(app, liveService, ownerFromHeaders,
-    async (ownerId, accountId, roomId) => {
+  if (liveService)
+    registerLiveRoutes(app, liveService, ownerFromHeaders, async (ownerId, accountId, roomId) => {
       if (!productSetStore || !accountConfig) return 'none';
       const sets = await productSetStore.list(ownerId);
       const selected = sets.find((item) => item.accountId === accountId && item.autoApply);

@@ -77,17 +77,19 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
       }
       const result = (await response.json()) as { outcome?: string };
       if (result.outcome === 'queued' || result.outcome === 'accepted') {
-        setSets((current) => current.map((set) => ({
-          ...set,
-          autoApply: set.accountId === item.accountId ? set.id === item.id : set.autoApply,
-        })));
+        setSets((current) =>
+          current.map((set) => ({
+            ...set,
+            autoApply: set.accountId === item.accountId ? set.id === item.id : set.autoApply,
+          })),
+        );
       }
       setMessage(
         result.outcome === 'queued'
           ? `บันทึกชุด “${item.name}” เพื่อส่งเข้าห้องใหม่เมื่อกดเริ่มไลฟ์`
           : result.outcome === 'accepted'
-          ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
-          : `ส่งชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`,
+            ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
+            : `ส่งชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`,
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'ส่งชุดสินค้าไม่สำเร็จ');

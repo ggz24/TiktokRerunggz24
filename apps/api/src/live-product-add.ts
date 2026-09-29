@@ -43,8 +43,12 @@ export const sendLiveProductAdd: ProductAddSender = async (request, cookieHeader
   if (code !== undefined || data.success === false) {
     // Only record an integer code. Response messages may contain account or request details.
     console.warn('TikTok Shop product add rejected application request', {
-      code: typeof code === 'number' && Number.isSafeInteger(code) ? code
-        : typeof code === 'string' && /^\d{1,9}$/.test(code) ? Number(code) : null,
+      code:
+        typeof code === 'number' && Number.isSafeInteger(code)
+          ? code
+          : typeof code === 'string' && /^\d{1,9}$/.test(code)
+            ? Number(code)
+            : null,
     });
     return 'rejected';
   }

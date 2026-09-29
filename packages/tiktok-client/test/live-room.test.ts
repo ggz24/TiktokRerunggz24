@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { createTikTokLiveRoom, endTikTokLiveRoom, parseCreatedRoom, type CreateRoomInput } from '../src';
+import {
+  createTikTokLiveRoom,
+  endTikTokLiveRoom,
+  parseCreatedRoom,
+  type CreateRoomInput,
+} from '../src';
 
 const input: CreateRoomInput = {
   title: 'Test room',
@@ -107,9 +112,14 @@ test('rejects malformed signing headers before sending any request', async () =>
 test('ends a known LIVE room with signed finish requests', async () => {
   let calls = 0;
   const result = await endTikTokLiveRoom(
-    { cookieHeader: input.cookieHeader, studioVersion: input.studioVersion,
-      deviceId: input.deviceId, installId: input.installId,
-      roomId: '1234567890123456789', streamId: '2234567890123456789' },
+    {
+      cookieHeader: input.cookieHeader,
+      studioVersion: input.studioVersion,
+      deviceId: input.deviceId,
+      installId: input.installId,
+      roomId: '1234567890123456789',
+      streamId: '2234567890123456789',
+    },
     async ({ stub }) => {
       assert.match(stub, /^[a-f0-9]{32}$/);
       return { 'x-khronos': '1234567890', 'x-ladon': 'fake-ladon', 'x-argus': 'fake-argus' };

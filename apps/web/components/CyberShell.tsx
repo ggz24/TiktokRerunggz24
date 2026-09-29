@@ -310,7 +310,10 @@ export default function CyberShell({ section, username }: { section: Page; usern
         throw new Error('อ่านการตั้งค่าสตรีมไม่สำเร็จ');
       const session = statusData.item as StreamSession;
       if (session.hasOpenRoom) {
-        setStartError({ accountId: account.id, message: 'ยังมีห้อง LIVE เดิมอยู่ กรุณากดลงไลฟ์เพื่อปิดห้องก่อนเริ่มใหม่' });
+        setStartError({
+          accountId: account.id,
+          message: 'ยังมีห้อง LIVE เดิมอยู่ กรุณากดลงไลฟ์เพื่อปิดห้องก่อนเริ่มใหม่',
+        });
         return;
       }
       if (!session.videoId || !account.liveTitle?.trim()) {
@@ -323,23 +326,33 @@ export default function CyberShell({ section, username }: { section: Page; usern
         notify('บัญชีนี้กำลังส่งสัญญาณอยู่แล้ว');
         return;
       }
-      const response = await fetch(`/api/live/sessions/${encodeURIComponent(account.id)}/start-auto`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: account.liveTitle.trim() }),
-      });
+      const response = await fetch(
+        `/api/live/sessions/${encodeURIComponent(account.id)}/start-auto`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: account.liveTitle.trim() }),
+        },
+      );
       if (!response.ok) {
         if (response.status === 409) throw new Error('สถานะสตรีมเปลี่ยนไป กรุณาลองอีกครั้ง');
         throw new Error('สร้างห้องหรือเริ่มส่งวิดีโอไม่สำเร็จ กรุณาตรวจบัญชีและบริการดึงคีย์');
       }
       const started: unknown = await response.json();
       await loadDashboardSessions();
-      const roomId = started && typeof started === 'object' && 'roomId' in started ? started.roomId : '';
+      const roomId =
+        started && typeof started === 'object' && 'roomId' in started ? started.roomId : '';
       notify(`สร้างห้อง LIVE ${roomId || ''} และเริ่มส่งวิดีโอแล้ว`);
-      const productsOutcome = started && typeof started === 'object' && 'productsOutcome' in started
-        ? started.productsOutcome : 'none';
+      const productsOutcome =
+        started && typeof started === 'object' && 'productsOutcome' in started
+          ? started.productsOutcome
+          : 'none';
       if (productsOutcome === 'rejected' || productsOutcome === 'unverified') {
-        setStartError({ accountId: account.id, message: 'ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop' });
+        setStartError({
+          accountId: account.id,
+          message:
+            'ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop',
+        });
       }
     } catch (error) {
       setStartError({
@@ -352,12 +365,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
   }
   async function stopAccountStream(account: SavedAccount) {
     if (stoppingAccountId) return;
-    if (
-      !window.confirm(
-        'ลงไลฟ์บัญชีนี้? ระบบจะหยุดวิดีโอและสั่งปิดห้องบน TikTok',
-      )
-    )
-      return;
+    if (!window.confirm('ลงไลฟ์บัญชีนี้? ระบบจะหยุดวิดีโอและสั่งปิดห้องบน TikTok')) return;
     setStoppingAccountId(account.id);
     setStartError(null);
     try {
@@ -367,10 +375,15 @@ export default function CyberShell({ section, username }: { section: Page; usern
       if (!response.ok) throw new Error('หยุดส่งสัญญาณไม่สำเร็จ กรุณาตรวจสถานะอีกครั้ง');
       const result: unknown = await response.json();
       await loadDashboardSessions();
-      const roomEnd = result && typeof result === 'object' && 'roomEnd' in result ? result.roomEnd : '';
+      const roomEnd =
+        result && typeof result === 'object' && 'roomEnd' in result ? result.roomEnd : '';
       if (roomEnd === 'ended') notify('หยุดวิดีโอแล้ว TikTok รับคำสั่งปิดห้อง LIVE');
       else if (roomEnd === 'no_room') notify('หยุดวิดีโอแล้ว ไม่พบห้อง LIVE ที่เปิดอยู่');
-      else setStartError({ accountId: account.id, message: 'หยุดวิดีโอแล้ว แต่ยังยืนยันการปิดห้อง TikTok ไม่ได้ กรุณาตรวจใน TikTok Shop' });
+      else
+        setStartError({
+          accountId: account.id,
+          message: 'หยุดวิดีโอแล้ว แต่ยังยืนยันการปิดห้อง TikTok ไม่ได้ กรุณาตรวจใน TikTok Shop',
+        });
     } catch (error) {
       setStartError({
         accountId: account.id,
@@ -415,31 +428,6 @@ export default function CyberShell({ section, username }: { section: Page; usern
       setStreamSetupNotice('บันทึกปลายทางแล้ว กลับไปกดเริ่มจากการ์ดบัญชีได้');
     } catch (error) {
       setStreamSetupError(error instanceof Error ? error.message : 'บันทึกปลายทางไม่สำเร็จ');
-    } finally {
-      setStreamBusy('');
-    }
-  }
-  async function saveStreamVideo() {
-    if (!selectedAccount || !streamVideoId || streamBusy || streamLoading) return;
-    setStreamBusy('video');
-    setStreamSetupError('');
-    try {
-      const response = await fetch(
-        `/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/video`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoId: streamVideoId }),
-        },
-      );
-      if (!response.ok) throw new Error('เปลี่ยนวิดีโอไม่สำเร็จ กรุณาหยุดสตรีมก่อน');
-      const data: unknown = await response.json();
-      if (!data || typeof data !== 'object' || !('item' in data) || !data.item)
-        throw new Error('อ่านผลการบันทึกไม่สำเร็จ');
-      setStreamSession(data.item as StreamSession);
-      setStreamSetupNotice('เปลี่ยนวิดีโอแล้ว');
-    } catch (error) {
-      setStreamSetupError(error instanceof Error ? error.message : 'เปลี่ยนวิดีโอไม่สำเร็จ');
     } finally {
       setStreamBusy('');
     }
@@ -498,11 +486,14 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setAccountFormError('');
     try {
       if (streamVideoId && streamVideoId !== streamSession?.videoId) {
-        const videoResponse = await fetch(`/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/video`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoId: streamVideoId }),
-        });
+        const videoResponse = await fetch(
+          `/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/video`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ videoId: streamVideoId }),
+          },
+        );
         if (!videoResponse.ok) throw new Error('บันทึกวิดีโอที่เลือกไม่สำเร็จ');
       }
       const response = await fetch(`/api/accounts/${encodeURIComponent(selectedAccount.id)}`, {

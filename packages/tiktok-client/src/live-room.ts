@@ -197,31 +197,53 @@ export async function endTikTokLiveRoom(
   sign: RoomSigner,
   http: typeof fetch = fetch,
 ): Promise<'ended' | 'no_room'> {
-  if (!input.cookieHeader || /[\r\n]/.test(input.cookieHeader) ||
+  if (
+    !input.cookieHeader ||
+    /[\r\n]/.test(input.cookieHeader) ||
     !/^\d+(?:\.\d+)+$/.test(input.studioVersion) ||
-    !/^\d{1,32}$/.test(input.deviceId) || !/^\d{1,32}$/.test(input.installId)) {
+    !/^\d{1,32}$/.test(input.deviceId) ||
+    !/^\d{1,32}$/.test(input.installId)
+  ) {
     throw new Error('LIVE room settings are incomplete.');
   }
   const region = input.region?.toLowerCase() ?? '';
   if (region && !/^[a-z]{2,8}$/.test(region)) throw new Error('Invalid LIVE region.');
   const params: Record<string, string> = {
-    aid: '8311', app_name: 'tiktok_live_studio', device_id: input.deviceId,
-    install_id: input.installId, channel: 'studio', version_code: input.studioVersion,
-    device_platform: 'windows', priority_region: region, live_mode: '6',
+    aid: '8311',
+    app_name: 'tiktok_live_studio',
+    device_id: input.deviceId,
+    install_id: input.installId,
+    channel: 'studio',
+    version_code: input.studioVersion,
+    device_platform: 'windows',
+    priority_region: region,
+    live_mode: '6',
   };
   const request = async (method: 'GET' | 'POST', path: string, body = '') => {
     const url = new URL(path, webcastOrigin);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
     const stub = body ? createHash('md5').update(body).digest('hex') : '';
-    const signature = await sign({ timestamp: Math.floor(Date.now() / 1000), aid: '8311',
-      device_id: input.deviceId, params, query: url.search.slice(1), stub });
+    const signature = await sign({
+      timestamp: Math.floor(Date.now() / 1000),
+      aid: '8311',
+      device_id: input.deviceId,
+      params,
+      query: url.search.slice(1),
+      stub,
+    });
     if (!validSignature(signature)) throw new Error('Room signer returned invalid headers.');
     const response = await http(url, {
       method,
       headers: {
-        accept: 'application/json', cookie: input.cookieHeader,
+        accept: 'application/json',
+        cookie: input.cookieHeader,
         ...(input.userAgent ? { 'user-agent': input.userAgent } : {}),
-        ...(body ? { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', 'x-ss-stub': stub } : {}),
+        ...(body
+          ? {
+              'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+              'x-ss-stub': stub,
+            }
+          : {}),
         ...signature,
         ...(region ? { 'x-tt-store-region': region } : {}),
       },
@@ -244,7 +266,11 @@ export async function endTikTokLiveRoom(
   if (!/^\d{8,24}$/.test(roomId) || !/^\d{8,24}$/.test(streamId)) {
     throw new Error('TikTok did not provide a valid LIVE room identifier.');
   }
-  const body = new URLSearchParams({ status: '4', room_id: roomId, stream_id: streamId }).toString();
+  const body = new URLSearchParams({
+    status: '4',
+    room_id: roomId,
+    stream_id: streamId,
+  }).toString();
   for (let attempt = 0; attempt < 2; attempt++) {
     const result = record(await request('POST', '/webcast/room/ping/anchor/', body));
     const code = string(result?.status_code);

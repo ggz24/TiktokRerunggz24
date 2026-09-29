@@ -16,12 +16,18 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   } catch {
     return liveError('รูปแบบข้อมูลไม่ถูกต้อง', 400);
   }
-  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    Array.isArray(body) ||
     Object.keys(body).length !== 1 ||
-    typeof (body as { title?: unknown }).title !== 'string') {
+    typeof (body as { title?: unknown }).title !== 'string'
+  ) {
     return liveError('กรุณากรอกชื่อไลฟ์', 400);
   }
   return proxyLive(request, `/api/v1/live/sessions/${accountId}/start-auto`, 'POST', {
-    contentType: 'application/json', body: JSON.stringify(body), timeoutMs: 65_000,
+    contentType: 'application/json',
+    body: JSON.stringify(body),
+    timeoutMs: 65_000,
   });
 }

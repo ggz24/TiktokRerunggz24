@@ -140,10 +140,15 @@ export function parseLiveProductAddCurl(input: string): ParsedLiveProductAddCurl
     invalid();
   }
   if (
-    url.protocol !== 'https:' || url.hostname !== 'shop.tiktok.com' || url.port ||
-    url.username || url.password || url.hash ||
+    url.protocol !== 'https:' ||
+    url.hostname !== 'shop.tiktok.com' ||
+    url.port ||
+    url.username ||
+    url.password ||
+    url.hash ||
     url.pathname !== '/api/v1/streamer_desktop/live_product/add'
-  ) invalid();
+  )
+    invalid();
   if (!headers.get('content-type')?.toLowerCase().startsWith('application/json')) invalid();
   const referer = headers.get('referer');
   if (referer) {
@@ -167,9 +172,14 @@ export function parseLiveProductAddCurl(input: string): ParsedLiveProductAddCurl
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) invalid();
   const data = parsed as Record<string, unknown>;
   // Streamer Desktop sends an empty room_id while preparing a LIVE that has not started.
-  if (typeof data.room_id !== 'string' ||
-      (data.room_id !== '' && !/^\d{8,24}$/.test(data.room_id))) invalid();
-  if (!Array.isArray(data.product_info) || data.product_info.length < 1 || data.product_info.length > 50) invalid();
+  if (typeof data.room_id !== 'string' || (data.room_id !== '' && !/^\d{8,24}$/.test(data.room_id)))
+    invalid();
+  if (
+    !Array.isArray(data.product_info) ||
+    data.product_info.length < 1 ||
+    data.product_info.length > 50
+  )
+    invalid();
   const productIds = data.product_info.map((item: unknown) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) invalid();
     const id = (item as Record<string, unknown>).product_id;

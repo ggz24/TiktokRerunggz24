@@ -56,9 +56,14 @@ export async function proxyProductSet(
     });
     if (response.status === 204) return new Response(null, { status: 204, headers: noStore });
     if (!response.ok) {
-      if (response.status === 400) return error('ข้อมูลชุดสินค้าไม่ถูกต้อง ตรวจชื่อ cURL และบัญชีที่เลือก', 400);
+      if (response.status === 400)
+        return error('ข้อมูลชุดสินค้าไม่ถูกต้อง ตรวจชื่อ cURL และบัญชีที่เลือก', 400);
       if (response.status === 404) return error('ไม่พบชุดสินค้าหรือบัญชีที่เลือก', 404);
-      if (response.status === 422) return error('TikTok Shop ปฏิเสธการเพิ่มสินค้าในห้อง LIVE นี้ คำขอ cURL ที่บันทึกไว้อาจหมดอายุ กรุณาคัดลอกคำขอใหม่ขณะ LIVE แล้วแก้ไขชุดสินค้า', 422);
+      if (response.status === 422)
+        return error(
+          'TikTok Shop ปฏิเสธการเพิ่มสินค้าในห้อง LIVE นี้ คำขอ cURL ที่บันทึกไว้อาจหมดอายุ กรุณาคัดลอกคำขอใหม่ขณะ LIVE แล้วแก้ไขชุดสินค้า',
+          422,
+        );
       return error('ระบบชุดสินค้ายังไม่พร้อม กรุณาลองอีกครั้ง', 503);
     }
     const result: unknown = await response.json();

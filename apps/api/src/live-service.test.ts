@@ -83,7 +83,8 @@ function fixture(
       assert.equal(who, owner);
       configs.set(id, config);
     },
-    getPreferredVideoId: async (who, id) => who === owner ? preferredVideos.get(id) ?? null : null,
+    getPreferredVideoId: async (who, id) =>
+      who === owner ? (preferredVideos.get(id) ?? null) : null,
     savePreferredVideoId: async (who, id, videoId) => {
       assert.equal(who, owner);
       preferredVideos.set(id, videoId);
@@ -518,59 +519,95 @@ test('auto destination uses the encrypted account session and keeps the returned
 test('start creates a room from the selected video and stop finishes that room', async () => {
   const created: string[] = [];
   const ended: string[] = [];
-  await withFixture(async ({ service, children, configs }) => {
-    const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
-    await service.selectVideo(owner, accountId, video.id);
-    const started = await service.startAuto(owner, accountId, 'Test LIVE');
-    assert.equal(started.roomId, '1234567890123456789');
-    assert.equal(started.session.status, 'starting');
-    assert.equal(configs.get(accountId)?.streamId, '2234567890123456789');
-    children[0].progress();
-    const stopped = await service.stopAndEnd(owner, accountId);
-    assert.equal(stopped.session.status, 'idle');
-    assert.equal(stopped.roomEnd, 'ended');
-    assert.deepEqual(created, ['Test LIVE']);
-    assert.deepEqual(ended, ['1234567890123456789']);
-  }, true, undefined,
-  async ({ title }) => {
-    created.push(title);
-    return { roomId: '1234567890123456789', streamId: '2234567890123456789',
-      rtmpUrl: 'rtmps://example.invalid/live', streamKey: secret };
-  },
-  async ({ roomId }) => {
-    ended.push(roomId ?? '');
-    return 'ended';
-  });
+  await withFixture(
+    async ({ service, children, configs }) => {
+      const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
+      await service.selectVideo(owner, accountId, video.id);
+      const started = await service.startAuto(owner, accountId, 'Test LIVE');
+      assert.equal(started.roomId, '1234567890123456789');
+      assert.equal(started.session.status, 'starting');
+      assert.equal(configs.get(accountId)?.streamId, '2234567890123456789');
+      children[0].progress();
+      const stopped = await service.stopAndEnd(owner, accountId);
+      assert.equal(stopped.session.status, 'idle');
+      assert.equal(stopped.roomEnd, 'ended');
+      assert.deepEqual(created, ['Test LIVE']);
+      assert.deepEqual(ended, ['1234567890123456789']);
+    },
+    true,
+    undefined,
+    async ({ title }) => {
+      created.push(title);
+      return {
+        roomId: '1234567890123456789',
+        streamId: '2234567890123456789',
+        rtmpUrl: 'rtmps://example.invalid/live',
+        streamKey: secret,
+      };
+    },
+    async ({ roomId }) => {
+      ended.push(roomId ?? '');
+      return 'ended';
+    },
+  );
 });
 
 test('a video selection storage error cannot leave a newly created room behind', async () => {
   let created = false;
-  await withFixture(async ({ service, store }) => {
-    const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
-    await service.configure(owner, accountId, {
-      rtmpUrl: 'rtmps://example.invalid/live', streamKey: secret, videoId: video.id,
-    });
-    store.savePreferredVideoId = async () => { throw new Error('database error'); };
-    await assert.rejects(service.startAuto(owner, accountId, 'Test LIVE'));
-    assert.equal(created, false);
-  }, true, undefined, async () => {
-    created = true;
-    return { roomId: '1234567890123456789', streamId: '2234567890123456789',
-      rtmpUrl: 'rtmps://example.invalid/live', streamKey: secret };
-  });
+  await withFixture(
+    async ({ service, store }) => {
+      const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
+      await service.configure(owner, accountId, {
+        rtmpUrl: 'rtmps://example.invalid/live',
+        streamKey: secret,
+        videoId: video.id,
+      });
+      store.savePreferredVideoId = async () => {
+        throw new Error('database error');
+      };
+      await assert.rejects(service.startAuto(owner, accountId, 'Test LIVE'));
+      assert.equal(created, false);
+    },
+    true,
+    undefined,
+    async () => {
+      created = true;
+      return {
+        roomId: '1234567890123456789',
+        streamId: '2234567890123456789',
+        rtmpUrl: 'rtmps://example.invalid/live',
+        streamKey: secret,
+      };
+    },
+  );
 });
 
 test('a room is sent a finish request if saving its destination fails', async () => {
   let finishedRoomId = '';
-  await withFixture(async ({ service, store }) => {
-    const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
-    await service.selectVideo(owner, accountId, video.id);
-    store.saveConfig = async () => { throw new Error('database error'); };
-    await assert.rejects(service.startAuto(owner, accountId, 'Test LIVE'),
-      (error: unknown) => error instanceof LiveError && error.statusCode === 503);
-    assert.equal(finishedRoomId, '1234567890123456789');
-  }, true, undefined,
-  async () => ({ roomId: '1234567890123456789', streamId: '2234567890123456789',
-    rtmpUrl: 'rtmps://example.invalid/live', streamKey: secret }),
-  async ({ roomId }) => { finishedRoomId = roomId ?? ''; return 'ended'; });
+  await withFixture(
+    async ({ service, store }) => {
+      const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
+      await service.selectVideo(owner, accountId, video.id);
+      store.saveConfig = async () => {
+        throw new Error('database error');
+      };
+      await assert.rejects(
+        service.startAuto(owner, accountId, 'Test LIVE'),
+        (error: unknown) => error instanceof LiveError && error.statusCode === 503,
+      );
+      assert.equal(finishedRoomId, '1234567890123456789');
+    },
+    true,
+    undefined,
+    async () => ({
+      roomId: '1234567890123456789',
+      streamId: '2234567890123456789',
+      rtmpUrl: 'rtmps://example.invalid/live',
+      streamKey: secret,
+    }),
+    async ({ roomId }) => {
+      finishedRoomId = roomId ?? '';
+      return 'ended';
+    },
+  );
 });

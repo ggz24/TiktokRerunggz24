@@ -33,7 +33,12 @@ export default function VideoLibraryPanel() {
       const response = await fetch('/api/live/videos', { cache: 'no-store' });
       if (!response.ok) throw new Error('โหลดคลังวิดีโอไม่สำเร็จ');
       const result: unknown = await response.json();
-      if (!result || typeof result !== 'object' || !('items' in result) || !Array.isArray(result.items)) {
+      if (
+        !result ||
+        typeof result !== 'object' ||
+        !('items' in result) ||
+        !Array.isArray(result.items)
+      ) {
         throw new Error('อ่านข้อมูลคลังวิดีโอไม่สำเร็จ');
       }
       setVideos(result.items as StoredVideo[]);
@@ -88,9 +93,11 @@ export default function VideoLibraryPanel() {
         method: 'DELETE',
       });
       if (!response.ok) {
-        throw new Error(response.status === 409
-          ? 'วิดีโอนี้กำลังถูกใช้ใน Live Session กรุณาเปลี่ยนวิดีโอก่อนลบ'
-          : 'ลบวิดีโอไม่สำเร็จ');
+        throw new Error(
+          response.status === 409
+            ? 'วิดีโอนี้กำลังถูกใช้ใน Live Session กรุณาเปลี่ยนวิดีโอก่อนลบ'
+            : 'ลบวิดีโอไม่สำเร็จ',
+        );
       }
       setVideos((current) => current.filter((item) => item.id !== video.id));
       setNotice('ลบวิดีโอแล้ว');
@@ -105,20 +112,29 @@ export default function VideoLibraryPanel() {
   return (
     <>
       <section className="cyber-panel">
-        <div className="cyber-panel-title"><span className="cyber-spark">▪</span> อัปโหลด MP4</div>
+        <div className="cyber-panel-title">
+          <span className="cyber-spark">▪</span> อัปโหลด MP4
+        </div>
         <div className="cyber-live-section">
           <p>สูงสุด 8 GB ต่อไฟล์ · คลังรวม 40 GB · ไม่เกิน 100 ไฟล์</p>
           <form className="cyber-live-form" onSubmit={upload}>
-            <label>เลือกไฟล์จากเครื่อง
-              <input ref={fileInput} type="file" accept="video/mp4,.mp4"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)} disabled={busy !== ''} />
+            <label>
+              เลือกไฟล์จากเครื่อง
+              <input
+                ref={fileInput}
+                type="file"
+                accept="video/mp4,.mp4"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                disabled={busy !== ''}
+              />
             </label>
             <button className="cyber-btn cyan" type="submit" disabled={!file || busy !== ''}>
               <Upload size={13} /> {busy === 'upload' ? 'กำลังอัปโหลด…' : 'อัปโหลด MP4'}
             </button>
           </form>
           {busy === 'upload' && progress !== null && (
-            <div role="status">กำลังอัปโหลด {progress}% — รอให้ระบบบันทึกไฟล์เสร็จก่อนปิดหน้านี้
+            <div role="status">
+              กำลังอัปโหลด {progress}% — รอให้ระบบบันทึกไฟล์เสร็จก่อนปิดหน้านี้
               <progress value={progress} max={100} style={{ display: 'block', width: '100%' }} />
             </div>
           )}
@@ -130,22 +146,39 @@ export default function VideoLibraryPanel() {
         <div className="cyber-panel-title">
           <span className="cyber-spark">▪</span> วิดีโอในคลัง
           <span className="cyber-panel-action">
-            <button className="cyber-btn" type="button" onClick={() => void refresh()} disabled={loading || busy !== ''}>
+            <button
+              className="cyber-btn"
+              type="button"
+              onClick={() => void refresh()}
+              disabled={loading || busy !== ''}
+            >
               <RefreshCw size={13} /> รีเฟรช
             </button>
           </span>
         </div>
         <div className="cyber-live-section">
-          <p>{videos.length} / {maxLibraryVideos} ไฟล์ · ใช้ไป {sizeLabel(usedBytes)} / 40 GB</p>
-          {loading ? <p>กำลังโหลดคลังวิดีโอ…</p> : videos.length === 0 ? (
+          <p>
+            {videos.length} / {maxLibraryVideos} ไฟล์ · ใช้ไป {sizeLabel(usedBytes)} / 40 GB
+          </p>
+          {loading ? (
+            <p>กำลังโหลดคลังวิดีโอ…</p>
+          ) : videos.length === 0 ? (
             <p>ยังไม่มีวิดีโอในคลัง</p>
           ) : (
             <div className="cyber-live-video-list">
               {videos.map((video) => (
                 <div key={video.id}>
-                  <span>{video.name} · {sizeLabel(video.sizeBytes)}</span>
-                  <button className="cyber-btn danger" type="button" disabled={busy !== ''}
-                    onClick={() => void remove(video)}>ลบ</button>
+                  <span>
+                    {video.name} · {sizeLabel(video.sizeBytes)}
+                  </span>
+                  <button
+                    className="cyber-btn danger"
+                    type="button"
+                    disabled={busy !== ''}
+                    onClick={() => void remove(video)}
+                  >
+                    ลบ
+                  </button>
                 </div>
               ))}
             </div>

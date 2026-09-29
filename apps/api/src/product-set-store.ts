@@ -47,7 +47,8 @@ type Row = {
   updated_at: Date | string;
 };
 
-const publicColumns = 'id, name, account_id, room_id, product_ids, has_cookie, auto_apply, created_at, updated_at';
+const publicColumns =
+  'id, name, account_id, room_id, product_ids, has_cookie, auto_apply, created_at, updated_at';
 
 function item(row: Row): ProductSetItem {
   return {
@@ -69,7 +70,11 @@ function encrypt(curl: string, key: Buffer, ownerId: string, id: string) {
   cipher.setAAD(Buffer.from(`${ownerId}\0${id}\0product-set`, 'utf8'));
   const plaintext = Buffer.from(curl, 'utf8');
   try {
-    return { ciphertext: Buffer.concat([cipher.update(plaintext), cipher.final()]), iv, tag: cipher.getAuthTag() };
+    return {
+      ciphertext: Buffer.concat([cipher.update(plaintext), cipher.final()]),
+      iv,
+      tag: cipher.getAuthTag(),
+    };
   } finally {
     plaintext.fill(0);
   }
@@ -105,7 +110,9 @@ export async function ensureProductSetTable(pool: Pool): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await pool.query('ALTER TABLE livehub_product_sets ADD COLUMN IF NOT EXISTS auto_apply BOOLEAN NOT NULL DEFAULT FALSE');
+  await pool.query(
+    'ALTER TABLE livehub_product_sets ADD COLUMN IF NOT EXISTS auto_apply BOOLEAN NOT NULL DEFAULT FALSE',
+  );
   await pool.query(`
     CREATE INDEX IF NOT EXISTS livehub_product_sets_owner_updated_idx
     ON livehub_product_sets (owner_id, updated_at DESC)
@@ -140,9 +147,18 @@ export function createPgProductSetStore(pool: Pool, key: Buffer): ProductSetStor
           curl_ciphertext, curl_iv, curl_tag)
          VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)
          RETURNING ${publicColumns}`,
-        [id, ownerId, input.name, input.accountId, input.roomId,
-          JSON.stringify(input.productIds), input.hasCookie,
-          secret.ciphertext, secret.iv, secret.tag],
+        [
+          id,
+          ownerId,
+          input.name,
+          input.accountId,
+          input.roomId,
+          JSON.stringify(input.productIds),
+          input.hasCookie,
+          secret.ciphertext,
+          secret.iv,
+          secret.tag,
+        ],
       );
       return item(result.rows[0]);
     },
@@ -156,9 +172,18 @@ export function createPgProductSetStore(pool: Pool, key: Buffer): ProductSetStor
            updated_at = NOW()
          WHERE owner_id = $1 AND id = $2
          RETURNING ${publicColumns}`,
-        [ownerId, id, input.name, input.accountId, input.roomId,
-          JSON.stringify(input.productIds), input.hasCookie,
-          secret.ciphertext, secret.iv, secret.tag],
+        [
+          ownerId,
+          id,
+          input.name,
+          input.accountId,
+          input.roomId,
+          JSON.stringify(input.productIds),
+          input.hasCookie,
+          secret.ciphertext,
+          secret.iv,
+          secret.tag,
+        ],
       );
       return result.rows[0] ? item(result.rows[0]) : null;
     },

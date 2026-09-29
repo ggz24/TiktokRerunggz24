@@ -7,7 +7,8 @@ const body = JSON.stringify({
   product_info: [{ product_id: '1732490821698225758', product_type: 4 }],
   need_product_info: true,
 });
-const url = 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/add?msToken=sample&X-Bogus=sample';
+const url =
+  'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/add?msToken=sample&X-Bogus=sample';
 const command = `curl --url '${url}' -H 'Content-Type: application/json' -H 'User-Agent: Test Browser' --data-raw '${body}'`;
 
 test('previews a product-add cURL without exposing signed query or requiring a cookie', () => {
@@ -36,7 +37,9 @@ test('accepts a pasted cookie but rejects other destinations and shell syntax', 
   );
   assert.throws(() => parseLiveProductAddCurl(command.replace('shop.tiktok.com', 'example.com')));
   assert.throws(() => parseLiveProductAddCurl(`${command}; echo unsafe`));
-  assert.throws(() => parseLiveProductAddCurl(command.replace('live_product/add', 'live_product/pin')));
+  assert.throws(() =>
+    parseLiveProductAddCurl(command.replace('live_product/add', 'live_product/pin')),
+  );
 });
 
 test('accepts the pre-LIVE Streamer Desktop request with an empty room ID', () => {
