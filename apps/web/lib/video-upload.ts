@@ -26,6 +26,10 @@ export function uploadMp4(file: File, onProgress: (percent: number) => void): Pr
         reject(new Error('ไฟล์ใหญ่เกิน 8 GB หรือพื้นที่คลัง 40 GB เต็ม'));
         return;
       }
+      if (request.status === 422) {
+        reject(new Error('ไฟล์ MP4 นี้แปลงเป็น H.264/AAC ไม่สำเร็จ กรุณาตรวจสอบไฟล์ต้นฉบับ'));
+        return;
+      }
       if (request.status !== 201) {
         reject(new Error('อัปโหลดวิดีโอไม่สำเร็จ กรุณาลองอีกครั้ง'));
         return;

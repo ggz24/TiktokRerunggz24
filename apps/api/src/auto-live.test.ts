@@ -125,6 +125,64 @@ test('AUTO settings reject invalid cycles and times', () => {
   );
 });
 
+test('AUTO starts more than ten independent accounts in bounded parallel batches', async () => {
+  const ids = Array.from(
+    { length: 12 },
+    (_, index) => `11111111-1111-4111-8111-${String(index + 1).padStart(12, '0')}`,
+  );
+  const rows = ids.map((id) => ({
+    owner_id: ownerId,
+    account_id: id,
+    settings: {
+      endAfterMinutes: null,
+      restartAfterMinutes: null,
+      dailyStartTime: '17:00',
+      recoverStream: false,
+      closedRoomAction: 'stop' as const,
+    },
+    phase: 'idle' as const,
+    phase_started_at: null,
+    retry_at: null,
+    last_schedule_day: null,
+    last_error: null,
+  }));
+  let active = 0;
+  let peak = 0;
+  let started = 0;
+  const pool = {
+    async query(sql: string) {
+      return { rows: sql.startsWith('SELECT * FROM livehub_auto_live') ? rows : [] };
+    },
+  } as unknown as Pool;
+  const service = {
+    async session() {
+      return { status: 'idle', hasOpenRoom: false };
+    },
+    async startAuto() {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active--;
+      started++;
+      return { roomId: '12345678', session: {} };
+    },
+  } as unknown as LiveService;
+  const accounts = {
+    async list() {
+      return ids.map((id) => ({ id, liveTitle: 'My LIVE' }));
+    },
+  } as unknown as AccountStore;
+  const manager = new AutoLiveManager(
+    pool,
+    service,
+    accounts,
+    () => new Date('2026-09-30T10:00:00.000Z'),
+  );
+  await manager.tick();
+  assert.equal(started, 12);
+  assert.ok(peak > 1 && peak <= 8);
+});
+
 test('daily start, timed end and rest restart run in order', async () => {
   const h = harness({
     endAfterMinutes: 10,

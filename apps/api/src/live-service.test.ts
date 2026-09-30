@@ -47,11 +47,15 @@ class FakeChild extends EventEmitter {
 
 function fixture(
   mediaDir: string,
-  canProbe = true,
+  canProbe: boolean | { videoCodec: string; audioCodec: string } = true,
   destinationProvider?: LiveDestinationProvider,
   autoRoomCreator?: AutoRoomCreator,
   autoRoomEnder?: AutoRoomEnder,
+  accountIds = [accountId],
+  maxConcurrentStreams: number | null = null,
 ) {
+  let currentProbe = canProbe;
+  let conversions = 0;
   const videos = new Map<string, LiveVideo>();
   const configs = new Map<string, LiveConfigRow>();
   const preferredVideos = new Map<string, string>();
@@ -59,7 +63,8 @@ function fixture(
   const args: string[][] = [];
   let accountStatus: string | null = 'connected';
   const store: LiveStore = {
-    accountStatus: async (who, id) => (who === owner && id === accountId ? accountStatus : null),
+    accountStatus: async (who, id) =>
+      who === owner && accountIds.includes(id) ? accountStatus : null,
     listVideos: async (who) => (who === owner ? [...videos.values()] : []),
     findVideo: async (who, id) => (who === owner ? (videos.get(id) ?? null) : null),
     insertVideo: async (who, video) => {
@@ -93,21 +98,19 @@ function fixture(
   const accountStore = {
     list: async (who: string) =>
       who === owner
-        ? [
-            {
-              id: accountId,
-              alias: 'Test account',
-              liveTitle: '',
-              verificationStatus: accountStatus,
-              probe: 'not_run',
-              probeHttpStatus: null,
-              createdAt: new Date().toISOString(),
-            },
-          ]
+        ? accountIds.map((id) => ({
+            id,
+            alias: 'Test account',
+            liveTitle: '',
+            verificationStatus: accountStatus,
+            probe: 'not_run',
+            probeHttpStatus: null,
+            createdAt: new Date().toISOString(),
+          }))
         : [],
     delete: async () => true,
     findEncrypted: async (who: string, id: string) =>
-      who === owner && id === accountId
+      who === owner && accountIds.includes(id)
         ? {
             id,
             ownerId: who,
@@ -127,10 +130,17 @@ function fixture(
       children.push(child);
       return child as unknown as ChildProcess;
     },
-    async () => canProbe,
+    async () => currentProbe,
     destinationProvider,
     autoRoomCreator,
     autoRoomEnder,
+    undefined,
+    maxConcurrentStreams,
+    async (source, destination) => {
+      conversions += 1;
+      await fs.copyFile(source, destination);
+      currentProbe = { videoCodec: 'h264', audioCodec: 'aac' };
+    },
   );
   return {
     service,
@@ -139,6 +149,12 @@ function fixture(
     configs,
     children,
     args,
+    get conversions() {
+      return conversions;
+    },
+    setProbe(value: boolean | { videoCodec: string; audioCodec: string }) {
+      currentProbe = value;
+    },
     setAccountStatus(value: string | null) {
       accountStatus = value;
     },
@@ -147,14 +163,26 @@ function fixture(
 
 async function withFixture(
   run: (value: ReturnType<typeof fixture>) => Promise<void>,
-  canProbe = true,
+  canProbe: boolean | { videoCodec: string; audioCodec: string } = true,
   destinationProvider?: LiveDestinationProvider,
   autoRoomCreator?: AutoRoomCreator,
   autoRoomEnder?: AutoRoomEnder,
+  accountIds = [accountId],
+  maxConcurrentStreams: number | null = null,
 ) {
   const mediaDir = await fs.mkdtemp(join(tmpdir(), 'live-service-test-'));
   try {
-    await run(fixture(mediaDir, canProbe, destinationProvider, autoRoomCreator, autoRoomEnder));
+    await run(
+      fixture(
+        mediaDir,
+        canProbe,
+        destinationProvider,
+        autoRoomCreator,
+        autoRoomEnder,
+        accountIds,
+        maxConcurrentStreams,
+      ),
+    );
   } finally {
     await fs.rm(mediaDir, { recursive: true, force: true });
   }
@@ -176,6 +204,27 @@ test('video upload validates MP4 and owner metadata without accepting paths', as
       (error: unknown) => error instanceof LiveError && error.statusCode === 400,
     );
   });
+});
+
+test('HEVC uploads are converted before becoming available and stream with copy', async () => {
+  await withFixture(
+    async (context) => {
+      const { service, args } = context;
+      const video = await service.uploadVideo(owner, 'hevc.mp4', Readable.from(mp4));
+      assert.equal(context.conversions, 1);
+      assert.equal(video.sizeBytes, mp4.length);
+      assert.deepEqual(await service.listVideos(owner), [video]);
+      await service.configure(owner, accountId, {
+        rtmpUrl: 'rtmps://example.invalid/live',
+        streamKey: secret,
+        videoId: video.id,
+      });
+      await service.start(owner, accountId);
+      assert.ok(args[0].includes('copy'));
+      assert.equal(args[0].includes('libx264'), false);
+    },
+    { videoCodec: 'hevc', audioCodec: 'aac' },
+  );
 });
 
 test('RTMP secrets stay encrypted; live requires progress and tracks actual process exit', async () => {
@@ -210,6 +259,73 @@ test('RTMP secrets stay encrypted; live requires progress and tracks actual proc
     assert.equal(service.isActive(owner, accountId), false);
     assert.equal(JSON.stringify(failed).includes(secret), false);
   });
+});
+
+test('twelve accounts can stream independently without an application-level limit', async () => {
+  const ids = Array.from(
+    { length: 12 },
+    (_, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  );
+  await withFixture(
+    async ({ service, children, args }) => {
+      const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
+      await Promise.all(
+        ids.map((id) =>
+          service.configure(owner, id, {
+            rtmpUrl: 'rtmps://example.invalid/live',
+            streamKey: secret,
+            videoId: video.id,
+          }),
+        ),
+      );
+      const sessions = await Promise.all(ids.map((id) => service.start(owner, id)));
+      assert.equal(children.length, 12);
+      assert.equal(sessions.filter((session) => session.status === 'starting').length, 12);
+      assert.ok(args.every((argv) => argv.includes('copy')));
+      children.forEach((child) => child.progress());
+      assert.equal(
+        (await service.listSessions(owner)).filter((session) => session.status === 'live').length,
+        12,
+      );
+      await service.stop(owner, ids[0]);
+      assert.equal((await service.session(owner, ids[1])).status, 'live');
+    },
+    { videoCodec: 'h264', audioCodec: 'aac' },
+    undefined,
+    undefined,
+    undefined,
+    ids,
+  );
+});
+
+test('an optional capacity setting rejects excess streams before FFmpeg launches', async () => {
+  const ids = [accountId, '00000000-0000-4000-8000-000000000002'];
+  await withFixture(
+    async ({ service, children }) => {
+      const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
+      await Promise.all(
+        ids.map((id) =>
+          service.configure(owner, id, {
+            rtmpUrl: 'rtmps://example.invalid/live',
+            streamKey: secret,
+            videoId: video.id,
+          }),
+        ),
+      );
+      await service.start(owner, ids[0]);
+      await assert.rejects(
+        service.start(owner, ids[1]),
+        (error: unknown) => error instanceof LiveError && error.statusCode === 429,
+      );
+      assert.equal(children.length, 1);
+    },
+    true,
+    undefined,
+    undefined,
+    undefined,
+    ids,
+    1,
+  );
 });
 
 test('changing the selected video keeps saved RTMP secrets and rejects active or foreign changes', async () => {
@@ -336,8 +452,9 @@ test('stop terminates FFmpeg and a disconnected account cannot start', async () 
 });
 
 test('invalid tracks prevent FFmpeg launch and live API never returns secrets', async () => {
-  await withFixture(async ({ service, accountStore, children }) => {
+  await withFixture(async ({ service, accountStore, children, setProbe }) => {
     const video = await service.uploadVideo(owner, 'clip.mp4', Readable.from(mp4));
+    setProbe(false);
     await service.configure(owner, accountId, {
       rtmpUrl: 'rtmps://example.invalid/live',
       streamKey: secret,
@@ -358,7 +475,7 @@ test('invalid tracks prevent FFmpeg launch and live API never returns secrets', 
     assert.equal(response.statusCode, 200);
     assert.equal(response.body.includes(secret), false);
     await app.close();
-  }, false);
+  });
 });
 
 test('binary upload and live routes enforce ownership and block deleting an active account', async () => {

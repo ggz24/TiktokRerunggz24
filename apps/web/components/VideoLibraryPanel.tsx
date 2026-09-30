@@ -74,7 +74,7 @@ export default function VideoLibraryPanel() {
       setVideos((current) => [item, ...current]);
       setFile(null);
       if (fileInput.current) fileInput.current.value = '';
-      setNotice('อัปโหลดวิดีโอเรียบร้อยแล้ว ใช้ไฟล์นี้ได้ในหน้า Live Session');
+      setNotice('วิดีโอพร้อมใช้งานแล้ว ระบบจะส่งสตรีมโดยไม่แปลงไฟล์ซ้ำ');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'อัปโหลดวิดีโอไม่สำเร็จ');
     } finally {
@@ -116,7 +116,10 @@ export default function VideoLibraryPanel() {
           <span className="cyber-spark">▪</span> อัปโหลด MP4
         </div>
         <div className="cyber-live-section">
-          <p>สูงสุด 8 GB ต่อไฟล์ · คลังรวม 40 GB · ไม่เกิน 100 ไฟล์</p>
+          <p>
+            สูงสุด 8 GB ต่อไฟล์ · คลังรวม 40 GB · ไม่เกิน 100 ไฟล์ · ระบบแปลงเป็น H.264/AAC
+            ก่อนนำเข้าคลัง
+          </p>
           <form className="cyber-live-form" onSubmit={upload}>
             <label>
               เลือกไฟล์จากเครื่อง
@@ -134,7 +137,9 @@ export default function VideoLibraryPanel() {
           </form>
           {busy === 'upload' && progress !== null && (
             <div role="status">
-              กำลังอัปโหลด {progress}% — รอให้ระบบบันทึกไฟล์เสร็จก่อนปิดหน้านี้
+              {progress < 100
+                ? `กำลังอัปโหลด ${progress}%`
+                : 'อัปโหลดครบแล้ว กำลังตรวจและแปลงวิดีโอเป็น H.264/AAC อาจใช้เวลาหลายนาที อย่าปิดหน้านี้'}
               <progress value={progress} max={100} style={{ display: 'block', width: '100%' }} />
             </div>
           )}

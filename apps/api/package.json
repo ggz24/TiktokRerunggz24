@@ -10,7 +10,8 @@
     "test": "tsx --test src/app.test.ts src/live-service.test.ts src/auto-live.test.ts",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:validate": "prisma validate --schema prisma/schema.prisma",
-    "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma"
+    "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma"
   },
   "dependencies": {
     "@live-hub/shared": "0.2.0",

@@ -64,7 +64,9 @@ export interface LiveDestinationProvider {
 }
 
 type SpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-type ProbeFn = (path: string) => Promise<boolean>;
+type VideoTracks = { videoCodec: string; audioCodec: string };
+type ProbeFn = (path: string) => Promise<boolean | VideoTracks>;
+type ConvertFn = (source: string, destination: string) => Promise<void>;
 
 interface RunningProcess {
   status: LiveStatus;
@@ -202,11 +204,11 @@ function mediaPath(mediaDir: string, videoId: string): string {
   return path;
 }
 
-export async function defaultProbeVideo(path: string): Promise<boolean> {
+export async function defaultProbeVideo(path: string): Promise<false | VideoTracks> {
   return new Promise((resolveResult) => {
     const child = spawn(
       'ffprobe',
-      ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'json', path],
+      ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name', '-of', 'json', path],
       { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, shell: false },
     );
     let output = '';
@@ -223,11 +225,19 @@ export async function defaultProbeVideo(path: string): Promise<boolean> {
       clearTimeout(timeout);
       if (code !== 0) return resolveResult(false);
       try {
-        const parsed = JSON.parse(output) as { streams?: { codec_type?: string }[] };
+        const parsed = JSON.parse(output) as {
+          streams?: { codec_type?: string; codec_name?: string }[];
+        };
         const streams = parsed.streams ?? [];
+        const video = streams.find((stream) => stream.codec_type === 'video');
+        const audio = streams.find((stream) => stream.codec_type === 'audio');
         resolveResult(
-          streams.some((stream) => stream.codec_type === 'video') &&
-            streams.some((stream) => stream.codec_type === 'audio'),
+          video && audio
+            ? {
+                videoCodec: video.codec_name ?? '',
+                audioCodec: audio.codec_name ?? '',
+              }
+            : false,
         );
       } catch {
         resolveResult(false);
@@ -236,8 +246,60 @@ export async function defaultProbeVideo(path: string): Promise<boolean> {
   });
 }
 
+export async function defaultConvertVideo(source: string, destination: string): Promise<void> {
+  await new Promise<void>((resolveResult, rejectResult) => {
+    const child = spawn(
+      'ffmpeg',
+      [
+        '-nostdin',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-i',
+        source,
+        '-map',
+        '0:v:0',
+        '-map',
+        '0:a:0',
+        '-vf',
+        'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '23',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        '-movflags',
+        '+faststart',
+        destination,
+      ],
+      { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false },
+    );
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (error) rejectResult(error);
+      else resolveResult();
+    };
+    child.stderr?.resume();
+    child.once('error', (error) => finish(error));
+    child.once('close', (code) =>
+      finish(code === 0 ? undefined : new Error('FFmpeg could not convert the uploaded video.')),
+    );
+  });
+}
+
 export class LiveService {
   private readonly processes = new Map<string, RunningProcess>();
+  private readonly openingRooms = new Set<string>();
   private readonly deletingAccounts = new Set<string>();
   private readonly configuringAccounts = new Set<string>();
   private readonly destinationProvider: LiveDestinationProvider;
@@ -253,14 +315,38 @@ export class LiveService {
     private readonly autoRoomCreator?: AutoRoomCreator,
     private readonly autoRoomEnder?: AutoRoomEnder,
     private readonly autoRoomChecker?: AutoRoomChecker,
+    private readonly maxConcurrentStreams: number | null = null,
+    private readonly convertVideo: ConvertFn = defaultConvertVideo,
   ) {
     if (encryptionKey.length !== 32) throw new Error('Live encryption key must be 32 bytes.');
+    if (
+      maxConcurrentStreams !== null &&
+      (!Number.isInteger(maxConcurrentStreams) || maxConcurrentStreams < 1)
+    )
+      throw new Error('Live concurrency limit must be a positive integer.');
     this.destinationProvider =
       destinationProvider ?? createSavedRtmpDestinationProvider(encryptionKey);
   }
 
   private processKey(ownerId: string, accountId: string): string {
     return `${ownerId}\0${accountId}`;
+  }
+
+  private occupiedSlots(): number {
+    const keys = new Set(this.openingRooms);
+    for (const [key, state] of this.processes) {
+      if (['starting', 'live', 'stopping'].includes(state.status)) keys.add(key);
+    }
+    return keys.size;
+  }
+
+  private requireCapacity(key: string): void {
+    if (
+      this.maxConcurrentStreams !== null &&
+      !this.openingRooms.has(key) &&
+      this.occupiedSlots() >= this.maxConcurrentStreams
+    )
+      throw new LiveError(429, `Live capacity reached (${this.maxConcurrentStreams} streams).`);
   }
 
   isActive(ownerId: string, accountId: string): boolean {
@@ -303,6 +389,7 @@ export class LiveService {
     const id = randomUUID();
     const finalPath = mediaPath(this.mediaDir, id);
     const temporaryPath = `${finalPath}.upload`;
+    const convertedPath = `${finalPath}.converted.mp4`;
     let size = 0;
     try {
       const limiter = new Transform({
@@ -328,13 +415,46 @@ export class LiveService {
       if (signature.toString('ascii', 4, 8) !== 'ftyp') {
         throw new LiveError(400, 'Invalid MP4 file.');
       }
-      await fs.rename(temporaryPath, finalPath);
-      const item = { id, name, sizeBytes: size, createdAt: new Date().toISOString() };
+      const tracks = await this.probeVideo(temporaryPath);
+      if (!tracks) throw new LiveError(422, 'MP4 must contain readable video and audio tracks.');
+      const canCopy =
+        typeof tracks === 'boolean' ||
+        (tracks.videoCodec === 'h264' && tracks.audioCodec === 'aac');
+      let storedSize = size;
+      if (!canCopy) {
+        try {
+          await this.convertVideo(temporaryPath, convertedPath);
+        } catch {
+          throw new LiveError(422, 'Could not convert MP4 to H.264/AAC.');
+        }
+        const converted = await fs.stat(convertedPath).catch(() => null);
+        if (
+          !converted?.isFile() ||
+          converted.size < 12 ||
+          converted.size > MAX_VIDEO_BYTES ||
+          usage.bytes + converted.size > MAX_OWNER_VIDEO_BYTES
+        ) {
+          throw new LiveError(413, 'Converted video exceeds the storage limit.');
+        }
+        const outputTracks = await this.probeVideo(convertedPath);
+        if (
+          typeof outputTracks !== 'object' ||
+          outputTracks.videoCodec !== 'h264' ||
+          outputTracks.audioCodec !== 'aac'
+        ) {
+          throw new LiveError(422, 'Converted video is not a valid H.264/AAC MP4.');
+        }
+        storedSize = converted.size;
+      }
+      await fs.rename(canCopy ? temporaryPath : convertedPath, finalPath);
+      if (!canCopy) await fs.rm(temporaryPath, { force: true });
+      const item = { id, name, sizeBytes: storedSize, createdAt: new Date().toISOString() };
       await this.store.insertVideo(ownerId, item);
       return item;
     } catch (error) {
       await Promise.allSettled([
         fs.rm(temporaryPath, { force: true }),
+        fs.rm(convertedPath, { force: true }),
         fs.rm(finalPath, { force: true }),
       ]);
       throw error;
@@ -608,18 +728,26 @@ export class LiveService {
     if (typeof title !== 'string' || !title.trim() || title.trim().length > 120) {
       throw new LiveError(400, 'Enter a LIVE title before starting.');
     }
+    const key = this.processKey(ownerId, accountId);
     if (this.isActive(ownerId, accountId)) throw new LiveError(409, 'Live is already running.');
-    const selectedVideoId = await this.store.getPreferredVideoId(ownerId, accountId);
-    const config = await this.store.getConfig(ownerId, accountId);
-    const videoId = selectedVideoId ?? config?.videoId;
-    if (!videoId) throw new LiveError(422, 'Select a video before starting.');
-    const { roomId } = await this.autoFetchDestination(ownerId, accountId, videoId, title);
+    if (this.openingRooms.has(key)) throw new LiveError(409, 'LIVE room is already opening.');
+    this.requireCapacity(key);
+    this.openingRooms.add(key);
     try {
-      return { session: await this.start(ownerId, accountId), roomId };
-    } catch (error) {
-      // A room may have been created even when the encoder cannot start.
-      await this.finishRoom(ownerId, accountId).catch(() => 'unverified');
-      throw error;
+      const selectedVideoId = await this.store.getPreferredVideoId(ownerId, accountId);
+      const config = await this.store.getConfig(ownerId, accountId);
+      const videoId = selectedVideoId ?? config?.videoId;
+      if (!videoId) throw new LiveError(422, 'Select a video before starting.');
+      const { roomId } = await this.autoFetchDestination(ownerId, accountId, videoId, title);
+      try {
+        return { session: await this.start(ownerId, accountId, true), roomId };
+      } catch (error) {
+        // A room may have been created even when the encoder cannot start.
+        await this.finishRoom(ownerId, accountId).catch(() => 'unverified');
+        throw error;
+      }
+    } finally {
+      this.openingRooms.delete(key);
     }
   }
 
@@ -680,11 +808,14 @@ export class LiveService {
     return { session: await this.session(ownerId, accountId), roomEnd };
   }
 
-  async start(ownerId: string, accountId: string): Promise<LiveSession> {
+  async start(ownerId: string, accountId: string, roomReserved = false): Promise<LiveSession> {
     const key = this.processKey(ownerId, accountId);
     if (this.deletingAccounts.has(key)) throw new LiveError(409, 'Account is being deleted.');
     if (this.configuringAccounts.has(key)) throw new LiveError(409, 'Live settings are changing.');
     if (this.isActive(ownerId, accountId)) throw new LiveError(409, 'Live is already running.');
+    if (this.openingRooms.has(key) && !roomReserved)
+      throw new LiveError(409, 'LIVE room is already opening.');
+    this.requireCapacity(key);
     const state: RunningProcess = { status: 'starting', cancelled: false };
     this.processes.set(key, state);
     try {
@@ -700,9 +831,12 @@ export class LiveService {
       if (!file?.isFile() || file.size !== video.sizeBytes) {
         throw new LiveError(422, 'Video file is unavailable.');
       }
-      if (!(await this.probeVideo(path))) {
+      const tracks = await this.probeVideo(path);
+      if (!tracks) {
         throw new LiveError(422, 'MP4 must contain readable video and audio tracks.');
       }
+      const canCopy =
+        typeof tracks === 'object' && tracks.videoCodec === 'h264' && tracks.audioCodec === 'aac';
       if (state.cancelled) return this.session(ownerId, accountId);
       const destination = await this.destinationProvider.resolve({ ownerId, accountId, config });
       const child = this.spawnProcess(
@@ -717,14 +851,14 @@ export class LiveService {
           '-re',
           '-i',
           path,
+          '-map',
+          '0:v:0',
+          '-map',
+          '0:a:0',
           '-c:v',
-          'libx264',
-          '-preset',
-          'veryfast',
-          '-pix_fmt',
-          'yuv420p',
+          ...(canCopy ? ['copy'] : ['libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p']),
           '-c:a',
-          'aac',
+          canCopy ? 'copy' : 'aac',
           '-f',
           'flv',
           '-progress',

@@ -18,6 +18,8 @@ const port = Number(process.env.API_PORT ?? 4000);
 const databaseUrl =
   process.env.DATABASE_URL ?? 'postgresql://livehub:livehub_dev@localhost:5433/livehub';
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6380';
+const configuredLiveLimit = process.env.MAX_CONCURRENT_LIVE?.trim();
+const maxConcurrentLive = configuredLiveLimit ? Number(configuredLiveLimit) : null;
 const pool = new Pool({ connectionString: databaseUrl, connectionTimeoutMillis: 2000 });
 const redis = createClient({
   url: redisUrl,
@@ -121,6 +123,7 @@ if (accountConfig) {
             createRapidApiRoomSigner(rapidApiKey),
           )
       : undefined,
+    maxConcurrentLive,
   );
   autoLive = new AutoLiveManager(pool, liveService, accountConfig.store);
 }

@@ -264,7 +264,7 @@ export default function LiveSessionPanel({
       }
       setFile(null);
       if (fileInput.current) fileInput.current.value = '';
-      setNotice('อัปโหลดวิดีโอแล้ว เลือกบัญชีและตั้งค่าการส่งสัญญาณก่อนเริ่ม');
+      setNotice('วิดีโอพร้อมใช้งานแล้ว เลือกบัญชีและตั้งค่าการส่งสัญญาณก่อนเริ่ม');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'อัปโหลดวิดีโอไม่สำเร็จ');
     } finally {
@@ -523,7 +523,9 @@ export default function LiveSessionPanel({
           </form>
           {busy === 'upload' && uploadProgress !== null && (
             <div role="status">
-              กำลังอัปโหลด {uploadProgress}% — รอให้ระบบบันทึกไฟล์เสร็จก่อนปิดหน้านี้
+              {uploadProgress < 100
+                ? `กำลังอัปโหลด ${uploadProgress}%`
+                : 'อัปโหลดครบแล้ว กำลังตรวจและแปลงวิดีโอเป็น H.264/AAC อาจใช้เวลาหลายนาที อย่าปิดหน้านี้'}
             </div>
           )}
           <label>

@@ -172,32 +172,37 @@ export class AutoLiveManager {
     this.ticking = true;
     try {
       const result = await this.pool.query<Row>('SELECT * FROM livehub_auto_live');
-      for (const row of result.rows) {
-        const key = `${row.owner_id}\0${row.account_id}`;
-        if (this.busy.has(key)) continue;
-        this.busy.add(key);
-        try {
-          await this.advance(row);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'AUTO action failed.';
-          await this.pool
-            .query(
-              `UPDATE livehub_auto_live SET last_error = $3, retry_at = $4, updated_at = NOW()
-             WHERE owner_id = $1 AND account_id = $2`,
-              [
-                row.owner_id,
-                row.account_id,
-                message.slice(0, 300),
-                new Date(this.now().getTime() + 30_000),
-              ],
-            )
-            .catch(() => undefined);
-        } finally {
-          this.busy.delete(key);
-        }
+      // Run independent accounts concurrently without flooding the database or room API.
+      for (let offset = 0; offset < result.rows.length; offset += 8) {
+        await Promise.all(result.rows.slice(offset, offset + 8).map((row) => this.advanceRow(row)));
       }
     } finally {
       this.ticking = false;
+    }
+  }
+
+  private async advanceRow(row: Row): Promise<void> {
+    const key = `${row.owner_id}\0${row.account_id}`;
+    if (this.busy.has(key)) return;
+    this.busy.add(key);
+    try {
+      await this.advance(row);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AUTO action failed.';
+      await this.pool
+        .query(
+          `UPDATE livehub_auto_live SET last_error = $3, retry_at = $4, updated_at = NOW()
+           WHERE owner_id = $1 AND account_id = $2`,
+          [
+            row.owner_id,
+            row.account_id,
+            message.slice(0, 300),
+            new Date(this.now().getTime() + 30_000),
+          ],
+        )
+        .catch(() => undefined);
+    } finally {
+      this.busy.delete(key);
     }
   }
 

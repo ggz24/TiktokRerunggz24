@@ -1,0 +1,143 @@
+name: ggz24livehub
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '5'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: livehub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: livehub
+    volumes: ['postgres_data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U livehub -d livehub']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [private]
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [private]
+    logging: *default-logging
+
+  migrate:
+    build: { context: ., target: api }
+    command: ['npm', 'run', 'db:migrate:deploy', '-w', '@live-hub/api']
+    environment:
+      DATABASE_URL: postgresql://livehub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}@postgres:5432/livehub
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [private]
+    logging: *default-logging
+
+  worker:
+    build: { context: ., target: worker }
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis: { condition: service_healthy }
+    networks: [private]
+    logging: *default-logging
+
+  api:
+    build: { context: ., target: api }
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      API_PORT: 4000
+      API_HOST: 0.0.0.0
+      DATABASE_URL: postgresql://livehub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}@postgres:5432/livehub
+      REDIS_URL: redis://redis:6379
+      ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY:?Set ACCOUNT_ENCRYPTION_KEY in .env.production}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN in .env.production}
+      LIVE_MEDIA_DIR: /app/media
+      MAX_CONCURRENT_LIVE: ${MAX_CONCURRENT_LIVE:-}
+      RAPIDAPI_KEY: ${RAPIDAPI_KEY:-}
+      TIKTOK_STUDIO_VERSION: ${TIKTOK_STUDIO_VERSION:-1.36.6}
+      TIKTOK_STUDIO_DEVICE_ID: ${TIKTOK_STUDIO_DEVICE_ID:-0}
+      TIKTOK_STUDIO_INSTALL_ID: ${TIKTOK_STUDIO_INSTALL_ID:-0}
+      TIKTOK_LIVE_CATEGORY_ID: ${TIKTOK_LIVE_CATEGORY_ID:-0}
+    volumes: ['media_data:/app/media']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks: [private]
+    logging: *default-logging
+
+  web:
+    build: { context: ., target: web }
+    restart: unless-stopped
+    environment:
+      APP_USERNAME: ${APP_USERNAME:?Set APP_USERNAME in .env.production}
+      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in .env.production}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env.production}
+      PUBLIC_BASE_URL: https://${DOMAIN:?Set DOMAIN in .env.production}
+      API_INTERNAL_URL: http://api:4000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN in .env.production}
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3100/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks: [edge, private]
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env.production}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web: { condition: service_healthy }
+    networks: [edge]
+    logging: *default-logging
+
+networks:
+  edge:
+  private:
+
+volumes:
+  postgres_data:
+  media_data:
+  caddy_data:
+  caddy_config:

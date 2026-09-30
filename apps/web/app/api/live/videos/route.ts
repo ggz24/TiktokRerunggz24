@@ -24,6 +24,6 @@ export async function POST(request: Request) {
     contentType: 'video/mp4',
     fileName,
     body: request.body,
-    timeoutMs: 3_600_000,
+    timeoutMs: 14_400_000,
   });
 }
