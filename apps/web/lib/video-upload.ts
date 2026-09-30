@@ -1,3 +1,4 @@
+import { apiPath } from './base-path';
 export const maxVideoBytes = 8 * 1024 * 1024 * 1024;
 export const maxLibraryBytes = 40 * 1024 * 1024 * 1024;
 export const maxLibraryVideos = 100;
@@ -12,7 +13,7 @@ export type StoredVideo = {
 export function uploadMp4(file: File, onProgress: (percent: number) => void): Promise<StoredVideo> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open('POST', '/api/live/videos');
+    request.open('POST', apiPath('/api/live/videos'));
     request.setRequestHeader('Content-Type', 'video/mp4');
     request.setRequestHeader('x-file-name', encodeURIComponent(file.name));
     request.upload.onprogress = (event) => {

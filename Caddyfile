@@ -9,3 +9,17 @@
     header_up X-Real-IP {remote_host}
   }
 }
+
+# Plain-HTTP hop for the front VM that serves https://ggz24.com. Only /live is forwarded;
+# the client IP comes from the front proxy's X-Real-IP header. Restrict TCP 8080 in the
+# Google Cloud firewall to the front VM's IP.
+:8080 {
+  encode zstd gzip
+  @live path /live /live/*
+  handle @live {
+    reverse_proxy web:3100
+  }
+  handle {
+    respond "Not found" 404
+  }
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { apiPath } from '@/lib/base-path';
 
 type Account = {
   id: string;
@@ -40,7 +41,7 @@ export default function ProductCurlPanel() {
   const [notice, setNotice] = useState('');
 
   async function loadSets() {
-    const response = await fetch('/api/live/product-sets', { cache: 'no-store' });
+    const response = await fetch(apiPath('/api/live/product-sets'), { cache: 'no-store' });
     if (!response.ok) throw new Error(await responseError(response));
     const result: unknown = await response.json();
     if (
@@ -55,7 +56,7 @@ export default function ProductCurlPanel() {
 
   useEffect(() => {
     let active = true;
-    fetch('/api/accounts', { cache: 'no-store' })
+    fetch(apiPath('/api/accounts'), { cache: 'no-store' })
       .then((response) => (response.ok ? response.json() : { items: [] }))
       .then((result) => {
         if (active && Array.isArray(result.items)) {
@@ -67,7 +68,7 @@ export default function ProductCurlPanel() {
       .catch(() => {
         if (active) setAccounts([]);
       });
-    fetch('/api/live/product-sets', { cache: 'no-store' })
+    fetch(apiPath('/api/live/product-sets'), { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error(await responseError(response));
         return response.json();
@@ -110,7 +111,7 @@ export default function ProductCurlPanel() {
     setError('');
     setNotice('');
     try {
-      const response = await fetch('/api/live/products', {
+      const response = await fetch(apiPath('/api/live/products'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'preview', curl }),
@@ -152,7 +153,9 @@ export default function ProductCurlPanel() {
     setNotice('');
     try {
       const response = await fetch(
-        editingId ? `/api/live/product-sets/${editingId}` : '/api/live/product-sets',
+        editingId
+          ? apiPath(`/api/live/product-sets/${editingId}`)
+          : apiPath('/api/live/product-sets'),
         {
           method: editingId ? 'PATCH' : 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -190,7 +193,7 @@ export default function ProductCurlPanel() {
     setError('');
     setNotice('');
     try {
-      const response = await fetch('/api/live/products', {
+      const response = await fetch(apiPath('/api/live/products'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'send', curl, ...(accountId ? { accountId } : {}) }),
@@ -221,7 +224,9 @@ export default function ProductCurlPanel() {
     setError('');
     setNotice('');
     try {
-      const response = await fetch(`/api/live/product-sets/${item.id}/send`, { method: 'POST' });
+      const response = await fetch(apiPath(`/api/live/product-sets/${item.id}/send`), {
+        method: 'POST',
+      });
       if (!response.ok) throw new Error(await responseError(response));
       const result = (await response.json()) as { outcome: string; queuedForLive?: boolean };
       setNotice(
@@ -245,7 +250,9 @@ export default function ProductCurlPanel() {
     setError('');
     setNotice('');
     try {
-      const response = await fetch(`/api/live/product-sets/${item.id}`, { method: 'DELETE' });
+      const response = await fetch(apiPath(`/api/live/product-sets/${item.id}`), {
+        method: 'DELETE',
+      });
       if (!response.ok) throw new Error(await responseError(response));
       if (editingId === item.id) resetEditor();
       await loadSets();

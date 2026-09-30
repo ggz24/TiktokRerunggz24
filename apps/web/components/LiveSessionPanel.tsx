@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Play, RefreshCw, Settings, Square, Upload, X } from 'lucide-react';
 import { maxVideoBytes, uploadMp4 } from '@/lib/video-upload';
+import { apiPath } from '@/lib/base-path';
 
 type LiveAccount = {
   id: string;
@@ -107,8 +108,8 @@ export default function LiveSessionPanel({
   const loadLive = useCallback(async () => {
     try {
       const [sessionsResponse, videosResponse] = await Promise.all([
-        fetch('/api/live/sessions', { cache: 'no-store' }),
-        fetch('/api/live/videos', { cache: 'no-store' }),
+        fetch(apiPath('/api/live/sessions'), { cache: 'no-store' }),
+        fetch(apiPath('/api/live/videos'), { cache: 'no-store' }),
       ]);
       if (!sessionsResponse.ok || !videosResponse.ok) {
         throw new Error('โหลดข้อมูลไลฟ์ไม่สำเร็จ กรุณาลองอีกครั้ง');
@@ -171,7 +172,7 @@ export default function LiveSessionPanel({
 
   const refreshSessions = useCallback(async () => {
     try {
-      const response = await fetch('/api/live/sessions', { cache: 'no-store' });
+      const response = await fetch(apiPath('/api/live/sessions'), { cache: 'no-store' });
       if (!response.ok) throw new Error('status unavailable');
       const data: unknown = await response.json();
       if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) {
@@ -191,9 +192,12 @@ export default function LiveSessionPanel({
 
   const refreshStatus = useCallback(async (accountId: string) => {
     try {
-      const response = await fetch(`/api/live/sessions/${encodeURIComponent(accountId)}/status`, {
-        cache: 'no-store',
-      });
+      const response = await fetch(
+        apiPath(`/api/live/sessions/${encodeURIComponent(accountId)}/status`),
+        {
+          cache: 'no-store',
+        },
+      );
       if (!response.ok) {
         setStatusUnavailable(true);
         return;
@@ -280,7 +284,7 @@ export default function LiveSessionPanel({
     setNotice('');
     try {
       const response = await fetch(
-        `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/video`,
+        apiPath(`/api/live/sessions/${encodeURIComponent(selectedAccountId)}/video`),
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -312,7 +316,7 @@ export default function LiveSessionPanel({
     setError('');
     setNotice('');
     try {
-      const response = await fetch(`/api/live/videos/${encodeURIComponent(video.id)}`, {
+      const response = await fetch(apiPath(`/api/live/videos/${encodeURIComponent(video.id)}`), {
         method: 'DELETE',
       });
       if (response.status === 409) {
@@ -344,7 +348,7 @@ export default function LiveSessionPanel({
     try {
       if (action === 'start' && selectedVideoId !== session?.videoId) {
         const selected = await fetch(
-          `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/video`,
+          apiPath(`/api/live/sessions/${encodeURIComponent(selectedAccountId)}/video`),
           {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -354,7 +358,9 @@ export default function LiveSessionPanel({
         if (!selected.ok) throw new Error(requestError(selected.status, 'บันทึกวิดีโอ'));
       }
       const response = await fetch(
-        `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/${action === 'start' ? 'start-auto' : 'stop'}`,
+        apiPath(
+          `/api/live/sessions/${encodeURIComponent(selectedAccountId)}/${action === 'start' ? 'start-auto' : 'stop'}`,
+        ),
         {
           method: 'POST',
           ...(action === 'start'

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { apiPath } from '@/lib/base-path';
 
 type ProductSet = {
   id: string;
@@ -21,7 +22,7 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
 
   useEffect(() => {
     let active = true;
-    fetch('/api/live/product-sets', { cache: 'no-store' })
+    fetch(apiPath('/api/live/product-sets'), { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error('โหลดชุดสินค้าไม่สำเร็จ');
         return response.json();
@@ -63,7 +64,9 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
     setMessage('');
     setError('');
     try {
-      const response = await fetch(`/api/live/product-sets/${item.id}/send`, { method: 'POST' });
+      const response = await fetch(apiPath(`/api/live/product-sets/${item.id}/send`), {
+        method: 'POST',
+      });
       if (!response.ok) {
         const result: unknown = await response.json().catch(() => null);
         throw new Error(

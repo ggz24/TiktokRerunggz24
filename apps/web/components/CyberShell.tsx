@@ -21,6 +21,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import { apiPath } from '@/lib/base-path';
 import '../app/cyber.css';
 
 type Page =
@@ -191,7 +192,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
   }, []);
   useEffect(() => {
     let active = true;
-    fetch('/api/system/health', { cache: 'no-store' })
+    fetch(apiPath('/api/system/health'), { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (active) {
@@ -210,7 +211,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setAccountsLoading(true);
     setAccountsError('');
     try {
-      const response = await fetch('/api/accounts', { cache: 'no-store' });
+      const response = await fetch(apiPath('/api/accounts'), { cache: 'no-store' });
       if (!response.ok) throw new Error('load failed');
       const data: unknown = await response.json();
       if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) {
@@ -229,7 +230,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
   }, [loadAccounts]);
   const loadDashboardSessions = useCallback(async () => {
     try {
-      const response = await fetch('/api/live/sessions', { cache: 'no-store' });
+      const response = await fetch(apiPath('/api/live/sessions'), { cache: 'no-store' });
       if (!response.ok) throw new Error('load failed');
       const data: unknown = await response.json();
       if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) {
@@ -254,7 +255,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     window.setTimeout(() => setToast(''), 3500);
   };
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await fetch(apiPath('/api/auth/logout'), { method: 'POST' });
     router.replace('/login');
     router.refresh();
   }
@@ -297,7 +298,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setStartError(null);
     try {
       const statusResponse = await fetch(
-        `/api/live/sessions/${encodeURIComponent(account.id)}/status`,
+        apiPath(`/api/live/sessions/${encodeURIComponent(account.id)}/status`),
         { cache: 'no-store' },
       );
       if (!statusResponse.ok) throw new Error('ตรวจการตั้งค่าสตรีมไม่สำเร็จ');
@@ -328,7 +329,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
         return;
       }
       const response = await fetch(
-        `/api/live/sessions/${encodeURIComponent(account.id)}/start-auto`,
+        apiPath(`/api/live/sessions/${encodeURIComponent(account.id)}/start-auto`),
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -370,9 +371,12 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setStoppingAccountId(account.id);
     setStartError(null);
     try {
-      const response = await fetch(`/api/live/sessions/${encodeURIComponent(account.id)}/stop`, {
-        method: 'POST',
-      });
+      const response = await fetch(
+        apiPath(`/api/live/sessions/${encodeURIComponent(account.id)}/stop`),
+        {
+          method: 'POST',
+        },
+      );
       if (!response.ok) throw new Error('หยุดส่งสัญญาณไม่สำเร็จ กรุณาตรวจสถานะอีกครั้ง');
       const result: unknown = await response.json();
       await loadDashboardSessions();
@@ -405,7 +409,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setStreamSetupNotice('');
     try {
       const response = await fetch(
-        `/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/config`,
+        apiPath(`/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/config`),
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -437,8 +441,10 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setStreamLoading(true);
     try {
       const [videoResponse, statusResponse] = await Promise.all([
-        fetch('/api/live/videos', { cache: 'no-store' }),
-        fetch(`/api/live/sessions/${encodeURIComponent(accountId)}/status`, { cache: 'no-store' }),
+        fetch(apiPath('/api/live/videos'), { cache: 'no-store' }),
+        fetch(apiPath(`/api/live/sessions/${encodeURIComponent(accountId)}/status`), {
+          cache: 'no-store',
+        }),
       ]);
       if (!videoResponse.ok || !statusResponse.ok) throw new Error('โหลดค่าการส่งสัญญาณไม่สำเร็จ');
       const videos: unknown = await videoResponse.json();
@@ -488,7 +494,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     try {
       if (streamVideoId && streamVideoId !== streamSession?.videoId) {
         const videoResponse = await fetch(
-          `/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/video`,
+          apiPath(`/api/live/sessions/${encodeURIComponent(selectedAccount.id)}/video`),
           {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -497,11 +503,14 @@ export default function CyberShell({ section, username }: { section: Page; usern
         );
         if (!videoResponse.ok) throw new Error('บันทึกวิดีโอที่เลือกไม่สำเร็จ');
       }
-      const response = await fetch(`/api/accounts/${encodeURIComponent(selectedAccount.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alias, liveTitle }),
-      });
+      const response = await fetch(
+        apiPath(`/api/accounts/${encodeURIComponent(selectedAccount.id)}`),
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ alias, liveTitle }),
+        },
+      );
       if (response.status === 404) throw new Error('ไม่พบบัญชีนี้ กรุณารีเฟรชรายการ');
       if (response.status === 401) throw new Error('กรุณาเข้าสู่ระบบอีกครั้ง');
       if (response.status === 400) throw new Error('ข้อมูลตั้งค่าไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง');
@@ -525,9 +534,12 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setAccountDeleting(true);
     setAccountFormError('');
     try {
-      const response = await fetch(`/api/accounts/${encodeURIComponent(selectedAccount.id)}`, {
-        method: 'DELETE',
-      });
+      const response = await fetch(
+        apiPath(`/api/accounts/${encodeURIComponent(selectedAccount.id)}`),
+        {
+          method: 'DELETE',
+        },
+      );
       if (response.status === 404) throw new Error('ไม่พบบัญชีนี้ กรุณารีเฟรชรายการ');
       if (response.status === 401) throw new Error('กรุณาเข้าสู่ระบบอีกครั้ง');
       if (response.status === 409) throw new Error('บัญชีนี้กำลังสตรีม กรุณาหยุดสตรีมก่อนลบ');
@@ -554,7 +566,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setAccountSubmitting(true);
     setAccountFormError('');
     try {
-      const response = await fetch('/api/accounts', {
+      const response = await fetch(apiPath('/api/accounts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -602,7 +614,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     if (verifyingAccountId) return;
     setVerifyingAccountId(id);
     try {
-      const response = await fetch(`/api/accounts/${encodeURIComponent(id)}/verify`, {
+      const response = await fetch(apiPath(`/api/accounts/${encodeURIComponent(id)}/verify`), {
         method: 'POST',
       });
       if (!response.ok) throw new Error('verify failed');

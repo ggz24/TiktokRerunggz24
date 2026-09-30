@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { apiPath } from '@/lib/base-path';
 
 type Settings = {
   endAfterMinutes: number | null;
@@ -77,7 +78,7 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
-  const path = `/api/live/sessions/${encodeURIComponent(accountId)}/auto-settings`;
+  const path = apiPath(`/api/live/sessions/${encodeURIComponent(accountId)}/auto-settings`);
 
   useEffect(() => {
     let active = true;

@@ -42,7 +42,7 @@ All remaining VM Docker commands use `sudo`, so the `admin` user does not need m
 After the latest commit is visible on GitHub, run on the VM:
 
 ```bash
-git clone https://github.com/notza0816581058/Tiktok-rerun.git ~/ggz24livehub
+git clone https://github.com/ggz24/TiktokRerunggz24.git ~/ggz24livehub
 cd ~/ggz24livehub
 git status --short --branch
 ```
@@ -88,13 +88,13 @@ sudo docker compose --env-file .env.production -f compose.production.yaml build 
 cat ~/$BACKUP_FOLDER/media.tar | sudo docker compose --env-file .env.production -f compose.production.yaml run --rm -T --no-deps --entrypoint sh api -c 'tar -C /app/media -xf -'
 sudo docker compose --env-file .env.production -f compose.production.yaml up --build -d
 sudo docker compose --env-file .env.production -f compose.production.yaml ps
-curl -I https://ggz24livehub.34-21-142-197.sslip.io/login
+curl -I https://ggz24livehub.34-21-142-197.sslip.io/live/login
 ```
 
 If a restore command fails, stop there and inspect the error; do not repeat `pg_restore` into a partly restored database. Do not use `docker compose down -v`, which removes the database and media volumes.
 
 ## 6. Verify before scheduling LIVE
 
-Visit `https://ggz24livehub.34-21-142-197.sslip.io/login`, sign in, verify the existing account and video library, and test one authorized LIVE manually. A healthy container or successful login does not establish that TikTok room creation, basket additions, or automatic recovery work for the account. Keep AUTO schedules off until that test is complete. See [production-deploy.md](production-deploy.md) for backup and update procedures.
+Visit `https://ggz24livehub.34-21-142-197.sslip.io/live/login`, sign in, verify the existing account and video library, and test one authorized LIVE manually. A healthy container or successful login does not establish that TikTok room creation, basket additions, or automatic recovery work for the account. Keep AUTO schedules off until that test is complete. See [production-deploy.md](production-deploy.md) for backup and update procedures.
 
 References: [Docker installation for Debian 13](https://docs.docker.com/engine/install/debian/), [Google Cloud CLI installer](https://docs.cloud.google.com/sdk/docs/install-sdk), [Google Cloud CLI file transfer](https://docs.cloud.google.com/sdk/gcloud/reference/compute/scp), [Google Cloud disk resizing](https://docs.cloud.google.com/compute/docs/disks/resize-persistent-disk).

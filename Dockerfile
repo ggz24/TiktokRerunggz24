@@ -12,6 +12,8 @@ FROM dependencies AS source
 COPY . .
 
 FROM source AS web
+ARG NEXT_PUBLIC_BASE_PATH=""
+ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
 RUN npm run build:web
 EXPOSE 3100
 CMD ["npm", "run", "start:web"]

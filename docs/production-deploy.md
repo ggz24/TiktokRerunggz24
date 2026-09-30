@@ -17,7 +17,7 @@ For the current Google Compute Engine VM and a step-by-step data migration, see 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml up --build -d
 docker compose --env-file .env.production -f compose.production.yaml ps
-curl -I "https://YOUR_DOMAIN/login"
+curl -I "https://YOUR_DOMAIN/live/login"
 ```
 
 The one-shot `migrate` service applies the reviewed Prisma schema before the API starts. The API then ensures its live-account tables exist. A successful health check means containers and dependencies are up; it does not prove TikTok room creation, product add, or LIVE playback. Test those with an authorized account before enabling AUTO schedules.

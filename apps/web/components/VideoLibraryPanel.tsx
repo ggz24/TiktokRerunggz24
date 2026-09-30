@@ -9,6 +9,7 @@ import {
   type StoredVideo,
   uploadMp4,
 } from '@/lib/video-upload';
+import { apiPath } from '@/lib/base-path';
 
 function sizeLabel(bytes: number) {
   return bytes >= 1024 ** 3
@@ -30,7 +31,7 @@ export default function VideoLibraryPanel() {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('/api/live/videos', { cache: 'no-store' });
+      const response = await fetch(apiPath('/api/live/videos'), { cache: 'no-store' });
       if (!response.ok) throw new Error('โหลดคลังวิดีโอไม่สำเร็จ');
       const result: unknown = await response.json();
       if (
@@ -89,7 +90,7 @@ export default function VideoLibraryPanel() {
     setError('');
     setNotice('');
     try {
-      const response = await fetch(`/api/live/videos/${encodeURIComponent(video.id)}`, {
+      const response = await fetch(apiPath(`/api/live/videos/${encodeURIComponent(video.id)}`), {
         method: 'DELETE',
       });
       if (!response.ok) {

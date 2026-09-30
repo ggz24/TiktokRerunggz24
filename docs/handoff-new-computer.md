@@ -2,7 +2,7 @@
 
 ## เริ่มงาน
 
-Clone repo `https://github.com/notza0816581058/Tiktok-rerun` และเลือก branch `main` ใช้ [README หลัก](../README.md) สำหรับการรัน หรือ [คู่มือย้ายเครื่อง](../transfer/README.md) หากต้องกู้คืนบัญชีและไฟล์อ้างอิงจากเครื่องเดิม
+Clone repo `https://github.com/ggz24/TiktokRerunggz24` และเลือก branch `main` ใช้ [README หลัก](../README.md) สำหรับการรัน หรือ [คู่มือย้ายเครื่อง](../transfer/README.md) หากต้องกู้คืนบัญชีและไฟล์อ้างอิงจากเครื่องเดิม
 
 โปรเจกต์เป็น monorepo: Next.js/TypeScript ที่ `apps/web`, API ที่ `apps/api`, worker ที่ `apps/worker`, event contracts ที่ `packages/shared`, และ client/fixtures ที่ `packages/tiktok-client` Compose เปิดเว็บที่ `localhost:3100` และ API ที่ `localhost:4000`
 

@@ -92,7 +92,11 @@ services:
     logging: *default-logging
 
   web:
-    build: { context: ., target: web }
+    build:
+      context: .
+      target: web
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${PUBLIC_BASE_PATH:-/live}
     restart: unless-stopped
     environment:
       APP_USERNAME: ${APP_USERNAME:?Set APP_USERNAME in .env.production}
@@ -109,7 +113,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3100/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:3100${PUBLIC_BASE_PATH:-/live}/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 10s
       timeout: 3s
@@ -122,7 +126,7 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env.production}
-    ports: ['80:80', '443:443', '443:443/udp']
+    ports: ['80:80', '443:443', '443:443/udp', '8080:8080']
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

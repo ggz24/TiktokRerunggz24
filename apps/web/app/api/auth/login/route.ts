@@ -73,7 +73,7 @@ export async function POST(request: Request) {
       (process.env.NODE_ENV === 'production' &&
         hostname !== 'localhost' &&
         hostname !== '127.0.0.1'),
-    path: '/',
+    path: process.env.NEXT_PUBLIC_BASE_PATH || '/',
     maxAge: 86400,
   });
   return response;
