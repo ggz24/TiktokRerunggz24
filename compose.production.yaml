@@ -34,16 +34,6 @@ services:
     networks: [private]
     logging: *default-logging
 
-  migrate:
-    build: { context: ., target: api }
-    command: ['npm', 'run', 'db:migrate:deploy', '-w', '@live-hub/api']
-    environment:
-      DATABASE_URL: postgresql://livehub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}@postgres:5432/livehub
-    depends_on:
-      postgres: { condition: service_healthy }
-    networks: [private]
-    logging: *default-logging
-
   worker:
     build: { context: ., target: worker }
     restart: unless-stopped
@@ -76,7 +66,6 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      migrate: { condition: service_completed_successfully }
     healthcheck:
       test:
         [
