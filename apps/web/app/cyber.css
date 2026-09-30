@@ -2454,6 +2454,23 @@
 .cyber-auto-settings input[type='time'] {
   max-width: 160px;
 }
+.cyber-auto-duration {
+  display: grid;
+  gap: 8px;
+}
+.cyber-auto-duration-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.cyber-auto-duration-fields label {
+  display: grid;
+  gap: 4px;
+}
+.cyber-auto-settings .cyber-auto-duration-fields input[type='number'] {
+  width: 96px;
+  margin: 0;
+}
 .cyber-live-video-change,
 .cyber-live-setup {
   display: flex;

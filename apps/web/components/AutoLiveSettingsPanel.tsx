@@ -17,6 +17,60 @@ const defaults: Settings = {
   closedRoomAction: 'stop',
 };
 
+function DurationFields({
+  label,
+  totalMinutes,
+  onChange,
+}: {
+  label: string;
+  totalMinutes: number;
+  onChange: (minutes: number) => void;
+}) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return (
+    <div className="cyber-auto-duration">
+      <span>{label}</span>
+      <div className="cyber-auto-duration-fields">
+        <label>
+          ชั่วโมง
+          <input
+            type="number"
+            min={0}
+            max={24}
+            step={1}
+            value={hours}
+            onChange={(event) => {
+              const nextHours = Math.max(
+                0,
+                Math.min(24, Math.trunc(Number(event.target.value) || 0)),
+              );
+              onChange(Math.min(1440, nextHours * 60 + minutes));
+            }}
+          />
+        </label>
+        <label>
+          นาที
+          <input
+            type="number"
+            min={0}
+            max={hours === 24 ? 0 : 59}
+            step={1}
+            value={minutes}
+            onChange={(event) => {
+              const nextMinutes = Math.max(
+                0,
+                Math.min(59, Math.trunc(Number(event.target.value) || 0)),
+              );
+              onChange(Math.min(1440, hours * 60 + nextMinutes));
+            }}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 export default function AutoLiveSettingsPanel({ accountId }: { accountId: string }) {
   const [settings, setSettings] = useState<Settings>(defaults);
   const [phase, setPhase] = useState('idle');
@@ -49,6 +103,14 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
   async function save() {
     if (settings.restartAfterMinutes !== null && settings.endAfterMinutes === null) {
       setMessage('เปิดลงไลฟ์เมื่อครบเวลาก่อนเปิดพักแล้วเริ่มใหม่');
+      return;
+    }
+    if (
+      [settings.endAfterMinutes, settings.restartAfterMinutes].some(
+        (value) => value !== null && (!Number.isInteger(value) || value < 1 || value > 1440),
+      )
+    ) {
+      setMessage('ระยะเวลาต้องมากกว่า 0 นาที และไม่เกิน 24 ชั่วโมง');
       return;
     }
     setSaving(true);
@@ -93,16 +155,11 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
             ⏬ ลงไลฟ์เองเมื่อออกอากาศครบเวลา
           </label>
           {settings.endAfterMinutes !== null && (
-            <label>
-              ออกอากาศนาน (นาที)
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={settings.endAfterMinutes}
-                onChange={(event) => change({ endAfterMinutes: Number(event.target.value) })}
-              />
-            </label>
+            <DurationFields
+              label="ออกอากาศนาน"
+              totalMinutes={settings.endAfterMinutes}
+              onChange={(minutes) => change({ endAfterMinutes: minutes })}
+            />
           )}
           <label className="cyber-auto-check">
             <input
@@ -116,16 +173,11 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
             ⏫ พักครบเวลาแล้วเริ่มไลฟ์ใหม่
           </label>
           {settings.restartAfterMinutes !== null && (
-            <label>
-              พักนาน (นาที)
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={settings.restartAfterMinutes}
-                onChange={(event) => change({ restartAfterMinutes: Number(event.target.value) })}
-              />
-            </label>
+            <DurationFields
+              label="พักนาน"
+              totalMinutes={settings.restartAfterMinutes}
+              onChange={(minutes) => change({ restartAfterMinutes: minutes })}
+            />
           )}
           <label className="cyber-auto-check">
             <input
