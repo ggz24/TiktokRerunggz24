@@ -13,7 +13,7 @@ function harness(settings: AutoSettings, phase: 'idle' | 'live' | 'resting' = 'i
   let status = 'idle';
   let roomState: 'open' | 'closed' = 'open';
   let roomCheckFails = false;
-  const calls = { started: 0, resumed: 0, stopped: 0 };
+  const calls = { started: 0, resumed: 0, stopped: 0, cleared: 0 };
   const row = {
     owner_id: ownerId,
     account_id: accountId,
@@ -74,6 +74,9 @@ function harness(settings: AutoSettings, phase: 'idle' | 'live' | 'resting' = 'i
     async currentRoomState() {
       if (roomCheckFails) throw new Error('Room state unknown.');
       return roomState;
+    },
+    async clearClosedRoom() {
+      calls.cleared++;
     },
   } as unknown as LiveService;
   const accounts = {
@@ -177,12 +180,14 @@ test('closed room obeys selected action; unknown state never creates a room', as
   await stop.manager.tick();
   assert.equal(stop.row.phase, 'idle');
   assert.equal(stop.calls.started, 0);
+  assert.equal(stop.calls.cleared, 1);
 
   const restart = harness({ ...settings, closedRoomAction: 'new_room' }, 'live');
   restart.setStatus('failed');
   restart.setRoomState('closed');
   await restart.manager.tick();
   assert.equal(restart.calls.started, 1);
+  assert.equal(restart.calls.cleared, 1);
 
   const unknown = harness({ ...settings, closedRoomAction: 'new_room' }, 'live');
   unknown.setStatus('failed');

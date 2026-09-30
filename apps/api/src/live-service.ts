@@ -415,6 +415,18 @@ export class LiveService {
     });
   }
 
+  async clearClosedRoom(ownerId: string, accountId: string): Promise<void> {
+    const config = await this.store.getConfig(ownerId, accountId);
+    if (!config?.roomId) return;
+    if ((await this.currentRoomState(ownerId, accountId)) !== 'closed')
+      throw new LiveError(409, 'The existing LIVE room is still open.');
+    await this.store.saveConfig(ownerId, accountId, {
+      ...config,
+      roomId: null,
+      streamId: null,
+    });
+  }
+
   async configure(
     ownerId: string,
     accountId: string,

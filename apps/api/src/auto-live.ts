@@ -225,8 +225,7 @@ export class AutoLiveManager {
         return;
       const session = await this.service.session(row.owner_id, row.account_id);
       if (session.status === 'live' || session.status === 'starting') return;
-      if (session.hasOpenRoom)
-        throw new Error('Existing TikTok room must be closed before AUTO start.');
+      if (session.hasOpenRoom) await this.service.clearClosedRoom(row.owner_id, row.account_id);
       await this.startNew(row);
       return;
     }
@@ -266,7 +265,11 @@ export class AutoLiveManager {
         [row.owner_id, row.account_id, new Date(now.getTime() + 30_000)],
       );
     } else if (settings.closedRoomAction === 'new_room') {
+      await this.service.clearClosedRoom(row.owner_id, row.account_id);
       await this.startNew(row);
-    } else await this.onStopped(row.owner_id, row.account_id);
+    } else {
+      await this.service.clearClosedRoom(row.owner_id, row.account_id);
+      await this.onStopped(row.owner_id, row.account_id);
+    }
   }
 }
