@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 import {
   createTikTokLiveRoom,
+  checkTikTokLiveRoom,
   endTikTokLiveRoom,
   parseCreatedRoom,
   type CreateRoomInput,
@@ -136,4 +137,69 @@ test('ends a known LIVE room with signed finish requests', async () => {
   );
   assert.equal(result, 'ended');
   assert.equal(calls, 2);
+});
+
+test('room check distinguishes the original room, closed room and rejected status', async () => {
+  const room = {
+    cookieHeader: input.cookieHeader,
+    studioVersion: input.studioVersion,
+    deviceId: input.deviceId,
+    installId: input.installId,
+    roomId: '1234567890123456789',
+    streamId: '2234567890123456789',
+  };
+  const sign = async () => ({
+    'x-khronos': '1234567890',
+    'x-ladon': 'fake-ladon',
+    'x-argus': 'fake-argus',
+  });
+  const response =
+    (payload: unknown): typeof fetch =>
+    async (url) => {
+      assert.equal(new URL(String(url)).pathname, '/webcast/room/continue/');
+      return Response.json(payload);
+    };
+  assert.equal(
+    await checkTikTokLiveRoom(
+      room,
+      sign,
+      response({
+        status_code: 0,
+        data: { room: { id_str: room.roomId } },
+      }),
+    ),
+    'open',
+  );
+  assert.equal(
+    await checkTikTokLiveRoom(
+      room,
+      sign,
+      response({
+        status_code: 0,
+        data: { room: { id_str: '9999999999999999999' } },
+      }),
+    ),
+    'closed',
+  );
+  assert.equal(
+    await checkTikTokLiveRoom(
+      room,
+      sign,
+      response({
+        status_code: 30003,
+        data: {},
+      }),
+    ),
+    'closed',
+  );
+  await assert.rejects(
+    checkTikTokLiveRoom(
+      room,
+      sign,
+      response({
+        status_code: 403,
+        data: {},
+      }),
+    ),
+  );
 });

@@ -70,6 +70,27 @@ function safeSession(value: unknown) {
 
 function safeResult(path: string, result: unknown) {
   const data = asRecord(result);
+  if (path.endsWith('/auto-settings') && data.item) {
+    const item = asRecord(data.item);
+    const settings = asRecord(item.settings);
+    return {
+      item: {
+        settings: {
+          endAfterMinutes:
+            typeof settings.endAfterMinutes === 'number' ? settings.endAfterMinutes : null,
+          restartAfterMinutes:
+            typeof settings.restartAfterMinutes === 'number' ? settings.restartAfterMinutes : null,
+          dailyStartTime:
+            typeof settings.dailyStartTime === 'string' ? settings.dailyStartTime : null,
+          recoverStream: settings.recoverStream === true,
+          closedRoomAction: settings.closedRoomAction === 'new_room' ? 'new_room' : 'stop',
+        },
+        phase: ['idle', 'live', 'resting'].includes(String(item.phase)) ? item.phase : 'idle',
+        phaseStartedAt: typeof item.phaseStartedAt === 'string' ? item.phaseStartedAt : null,
+        lastError: typeof item.lastError === 'string' ? item.lastError : null,
+      },
+    };
+  }
   if (path.includes('/live/videos')) {
     if (Array.isArray(data.items)) return { items: data.items.map(safeVideo) };
     if (data.item) return { item: safeVideo(data.item) };

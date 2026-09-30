@@ -7,7 +7,12 @@ export type { ParsedAccountImportCurl } from './account-curl';
 export { parseLiveProductAddCurl, forLiveProductRoom } from './live-product-curl';
 export type { ParsedLiveProductAddCurl } from './live-product-curl';
 export { parseProxyConfig } from './proxy';
-export { createTikTokLiveRoom, endTikTokLiveRoom, parseCreatedRoom } from './live-room';
+export {
+  createTikTokLiveRoom,
+  endTikTokLiveRoom,
+  checkTikTokLiveRoom,
+  parseCreatedRoom,
+} from './live-room';
 export { createRapidApiRoomSigner } from './rapidapi-signer';
 export type {
   CreateRoomInput,

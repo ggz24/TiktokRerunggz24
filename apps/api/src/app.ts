@@ -16,6 +16,7 @@ import {
   type StoredAccount,
 } from './accounts.js';
 import { registerLiveRoutes } from './live-routes.js';
+import type { AutoLiveManager } from './auto-live.js';
 import type { LiveService } from './live-service.js';
 import { sendLiveProductAdd, type ProductAddSender } from './live-product-add.js';
 import type { ProductSetInput, ProductSetStore } from './product-set-store.js';
@@ -45,6 +46,7 @@ export function createApp(
   liveService?: LiveService,
   productAddSender: ProductAddSender = sendLiveProductAdd,
   productSetStore?: ProductSetStore,
+  autoLive?: AutoLiveManager,
 ) {
   if (accountConfig) validateAccountConfig(accountConfig);
   const app = Fastify({ logger: false, requestTimeout: 3_600_000 });
@@ -577,8 +579,8 @@ export function createApp(
     }
   });
 
-  if (liveService)
-    registerLiveRoutes(app, liveService, ownerFromHeaders, async (ownerId, accountId) => {
+  if (liveService) {
+    const onRoomStarted = async (ownerId: string, accountId: string) => {
       if (!productSetStore || !accountConfig) return 'none';
       const sets = await productSetStore.list(ownerId);
       const selected = sets.find((item) => item.accountId === accountId && item.autoApply);
@@ -590,7 +592,10 @@ export function createApp(
       } catch {
         return 'unverified';
       }
-    });
+    };
+    registerLiveRoutes(app, liveService, ownerFromHeaders, onRoomStarted, autoLive);
+    autoLive?.setOnRoomStarted(onRoomStarted);
+  }
 
   return app;
 }

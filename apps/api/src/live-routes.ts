@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Readable } from 'node:stream';
 import { LiveError, LiveService } from './live-service.js';
+import type { AutoLiveManager } from './auto-live.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -22,6 +23,7 @@ export function registerLiveRoutes(
     accountId: string,
     roomId: string,
   ) => Promise<'accepted' | 'rejected' | 'unverified' | 'none'>,
+  autoLive?: AutoLiveManager,
 ): void {
   app.addContentTypeParser(['video/mp4', 'application/octet-stream'], (_request, payload, done) =>
     done(null, payload),
@@ -96,6 +98,33 @@ export function registerLiveRoutes(
       return failure(reply, error);
     }
   });
+
+  if (autoLive) {
+    app.get('/api/v1/live/sessions/:accountId/auto-settings', async (request, reply) => {
+      const ownerId = ownerFromHeaders(request.headers);
+      if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+      const { accountId } = request.params as { accountId: string };
+      if (!uuidPattern.test(accountId))
+        return reply.status(400).send({ error: 'Invalid account ID.' });
+      try {
+        return { item: await autoLive.get(ownerId, accountId) };
+      } catch (error) {
+        return failure(reply, error);
+      }
+    });
+    app.put('/api/v1/live/sessions/:accountId/auto-settings', async (request, reply) => {
+      const ownerId = ownerFromHeaders(request.headers);
+      if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+      const { accountId } = request.params as { accountId: string };
+      if (!uuidPattern.test(accountId))
+        return reply.status(400).send({ error: 'Invalid account ID.' });
+      try {
+        return { item: await autoLive.save(ownerId, accountId, request.body) };
+      } catch (error) {
+        return failure(reply, error);
+      }
+    });
+  }
 
   app.put('/api/v1/live/sessions/:accountId/config', async (request, reply) => {
     const ownerId = ownerFromHeaders(request.headers);
@@ -191,7 +220,9 @@ export function registerLiveRoutes(
     if (!uuidPattern.test(accountId))
       return reply.status(400).send({ error: 'Invalid account ID.' });
     try {
-      return { item: await service.start(ownerId, accountId) };
+      const item = await service.start(ownerId, accountId);
+      if (item.hasOpenRoom) await autoLive?.onStarted(ownerId, accountId);
+      return { item };
     } catch (error) {
       return failure(reply, error);
     }
@@ -215,6 +246,7 @@ export function registerLiveRoutes(
     }
     try {
       const result = await service.startAuto(ownerId, accountId, (body as { title: string }).title);
+      await autoLive?.onStarted(ownerId, accountId);
       const productsOutcome = onRoomStarted
         ? await onRoomStarted(ownerId, accountId, result.roomId).catch(() => 'unverified' as const)
         : 'none';
@@ -231,6 +263,7 @@ export function registerLiveRoutes(
     if (!uuidPattern.test(accountId))
       return reply.status(400).send({ error: 'Invalid account ID.' });
     try {
+      await autoLive?.onStopped(ownerId, accountId);
       const result = await service.stopAndEnd(ownerId, accountId);
       return { item: result.session, roomEnd: result.roomEnd };
     } catch (error) {

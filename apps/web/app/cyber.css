@@ -2436,6 +2436,24 @@
 .cyber-stream-settings .cyber-btn {
   justify-self: start;
 }
+.cyber-auto-settings {
+  border-color: var(--cyber-cyan);
+}
+.cyber-auto-settings .cyber-auto-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cyber-modal-body .cyber-auto-check input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: none;
+}
+.cyber-auto-settings input[type='number'],
+.cyber-auto-settings input[type='time'] {
+  max-width: 160px;
+}
 .cyber-live-video-change,
 .cyber-live-setup {
   display: flex;

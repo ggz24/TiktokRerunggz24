@@ -5,11 +5,13 @@ import { createPgAccountStore, ensureAccountTable } from './account-store.js';
 import { parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
 import { createPgLiveStore, ensureLiveTables } from './live-store.js';
 import { LiveService } from './live-service.js';
+import { AutoLiveManager, ensureAutoLiveTable } from './auto-live.js';
 import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
 import {
   createRapidApiRoomSigner,
   createTikTokLiveRoom,
   endTikTokLiveRoom,
+  checkTikTokLiveRoom,
 } from '@live-hub/tiktok-client';
 
 const port = Number(process.env.API_PORT ?? 4000);
@@ -37,9 +39,11 @@ const accountConfig: AccountConfig | undefined =
       }
     : undefined;
 let liveService: LiveService | undefined;
+let autoLive: AutoLiveManager | undefined;
 if (accountConfig) {
   await ensureAccountTable(pool);
   await ensureLiveTables(pool);
+  await ensureAutoLiveTable(pool);
   await ensureProductSetTable(pool);
   const rapidApiKey = process.env.RAPIDAPI_KEY?.trim();
   const autoRoomCreator = rapidApiKey
@@ -102,7 +106,23 @@ if (accountConfig) {
     undefined,
     autoRoomCreator,
     autoRoomEnder,
+    rapidApiKey
+      ? async ({ cookieHeader, userAgent, roomId, streamId }) =>
+          checkTikTokLiveRoom(
+            {
+              cookieHeader,
+              roomId,
+              streamId,
+              studioVersion: process.env.TIKTOK_STUDIO_VERSION ?? '1.36.6',
+              deviceId: process.env.TIKTOK_STUDIO_DEVICE_ID ?? '0',
+              installId: process.env.TIKTOK_STUDIO_INSTALL_ID ?? '0',
+              ...(userAgent ? { userAgent } : {}),
+            },
+            createRapidApiRoomSigner(rapidApiKey),
+          )
+      : undefined,
   );
+  autoLive = new AutoLiveManager(pool, liveService, accountConfig.store);
 }
 
 const app = createApp(
@@ -123,9 +143,11 @@ const app = createApp(
   liveService,
   undefined,
   accountConfig ? createPgProductSetStore(pool, accountConfig.encryptionKey) : undefined,
+  autoLive,
 );
 
 async function shutdown() {
+  autoLive?.stop();
   await app.close();
   await pool.end();
   if (redis.isOpen) await redis.quit();
@@ -138,4 +160,5 @@ process.once('SIGTERM', () => {
 });
 
 await app.listen({ port, host: process.env.API_HOST ?? '127.0.0.1' });
+autoLive?.start();
 console.log(`API listening on ${port}`);

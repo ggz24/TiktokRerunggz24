@@ -7,6 +7,7 @@ import LiveSessionPanel from './LiveSessionPanel';
 import VideoLibraryPanel from './VideoLibraryPanel';
 import ProductCurlPanel from './ProductCurlPanel';
 import QuickProductSetPanel from './QuickProductSetPanel';
+import AutoLiveSettingsPanel from './AutoLiveSettingsPanel';
 import {
   CircleCheck,
   LogOut,
@@ -1214,6 +1215,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
                       </p>
                     )}
                   </div>
+                  <AutoLiveSettingsPanel accountId={selectedAccount.id} />
                   {accountFormError && (
                     <p className="cyber-account-error" role="alert">
                       {accountFormError}

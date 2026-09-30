@@ -43,6 +43,56 @@ export type EndRoomInput = Omit<CreateRoomInput, 'title' | 'categoryId'> & {
   streamId?: string | null;
 };
 
+/** Checks the current room without changing its state. Unknown responses throw. */
+export async function checkTikTokLiveRoom(
+  input: EndRoomInput,
+  sign: RoomSigner,
+  http: typeof fetch = fetch,
+): Promise<'open' | 'closed'> {
+  if (!input.cookieHeader || /[\r\n]/.test(input.cookieHeader)) throw new Error('Invalid session.');
+  const params: Record<string, string> = {
+    aid: '8311',
+    app_name: 'tiktok_live_studio',
+    device_id: input.deviceId,
+    install_id: input.installId,
+    channel: 'studio',
+    version_code: input.studioVersion,
+    device_platform: 'windows',
+    priority_region: input.region?.toLowerCase() ?? '',
+    live_mode: '6',
+  };
+  const url = new URL('/webcast/room/continue/', webcastOrigin);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  const signature = await sign({
+    timestamp: Math.floor(Date.now() / 1000),
+    aid: '8311',
+    device_id: input.deviceId,
+    params,
+    query: url.search.slice(1),
+    stub: '',
+  });
+  if (!validSignature(signature)) throw new Error('Invalid room signature.');
+  const response = await http(url, {
+    headers: {
+      accept: 'application/json',
+      cookie: input.cookieHeader,
+      ...(input.userAgent ? { 'user-agent': input.userAgent } : {}),
+      ...signature,
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error('Room check failed.');
+  const root = record(await response.json());
+  const statusCode = string(root?.status_code);
+  if (!['0', '30003', '30003001'].includes(statusCode)) throw new Error('Room check was rejected.');
+  const room = record(record(root?.data)?.room);
+  const attrs = record(room?.living_room_attrs);
+  const roomId = string(attrs?.room_id_str ?? attrs?.room_id ?? room?.id_str ?? room?.id);
+  if (!roomId) return 'closed';
+  if (!/^\d{8,24}$/.test(roomId)) throw new Error('Invalid room status.');
+  return roomId === input.roomId ? 'open' : 'closed';
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

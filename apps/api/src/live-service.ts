@@ -46,6 +46,13 @@ export type AutoRoomEnder = (input: {
   streamId?: string | null;
 }) => Promise<'ended' | 'no_room'>;
 
+export type AutoRoomChecker = (input: {
+  cookieHeader: string;
+  userAgent?: string;
+  roomId: string;
+  streamId?: string | null;
+}) => Promise<'open' | 'closed'>;
+
 // A destination is only an FFmpeg output target. Resolving one does not prove that
 // a platform room exists or that the stream is visible to viewers.
 export interface LiveDestinationProvider {
@@ -245,6 +252,7 @@ export class LiveService {
     destinationProvider?: LiveDestinationProvider,
     private readonly autoRoomCreator?: AutoRoomCreator,
     private readonly autoRoomEnder?: AutoRoomEnder,
+    private readonly autoRoomChecker?: AutoRoomChecker,
   ) {
     if (encryptionKey.length !== 32) throw new Error('Live encryption key must be 32 bytes.');
     this.destinationProvider =
@@ -389,6 +397,22 @@ export class LiveService {
       throw new LiveError(404, 'Account not found.');
     }
     return (await this.store.getConfig(ownerId, accountId))?.roomId ?? null;
+  }
+
+  async currentRoomState(ownerId: string, accountId: string): Promise<'open' | 'closed'> {
+    const config = await this.store.getConfig(ownerId, accountId);
+    if (!config?.roomId) return 'closed';
+    if (!this.autoRoomChecker) throw new LiveError(503, 'Room check is unavailable.');
+    const secret = await this.accounts.findEncrypted(ownerId, accountId);
+    if (!secret) throw new LiveError(404, 'Account credentials not found.');
+    return this.autoRoomChecker({
+      cookieHeader: decryptAccountCookie(secret, this.encryptionKey, ownerId, accountId),
+      userAgent: secret.userAgent
+        ? decryptAccountUserAgent(secret.userAgent, this.encryptionKey, ownerId, accountId)
+        : undefined,
+      roomId: config.roomId,
+      streamId: config.streamId,
+    });
   }
 
   async configure(
