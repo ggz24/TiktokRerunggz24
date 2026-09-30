@@ -30,24 +30,8 @@ const {
   mockLiveSessionId,
   parseAccountImportCurl,
   parseLiveProductAddCurl,
-  forLiveProductRoom,
 } = require('@live-hub/tiktok-client') as typeof import('@live-hub/tiktok-client');
 const mockClient = createTikTokClient(createMockTransport());
-
-// TikTok Shop may require cookies that are absent from a general TikTok account import.
-// Use the captured Shop session only when it belongs to the selected account.
-function shopCookieForAccount(shopCookie: string | undefined, accountCookie: string): string {
-  const sessionId = (header: string) =>
-    header
-      .split(';')
-      .map((part) => part.trim())
-      .find((part) => part.startsWith('sessionid='))
-      ?.slice('sessionid='.length);
-  const accountSession = sessionId(accountCookie);
-  return accountSession && shopCookie && sessionId(shopCookie) === accountSession
-    ? shopCookie
-    : accountCookie;
-}
 
 export type HealthDependencies = {
   postgres: () => Promise<void>;
@@ -184,23 +168,21 @@ export function createApp(
     if (input.accountId && liveService) {
       try {
         const roomId = await liveService.currentRoomId(ownerId, input.accountId);
-        if (!roomId)
+        if (!roomId && !input.parsed.cookieHeader)
           return reply
             .status(409)
             .send({ error: 'Save this as a product set and queue it before LIVE.' });
         const account = await accountConfig.store.findEncrypted(ownerId, input.accountId);
         if (!account) return reply.status(404).send({ error: 'Account not found.' });
-        const cookieHeader = decryptAccountCookie(
-          account,
-          accountConfig.encryptionKey,
-          ownerId,
-          input.accountId,
-        );
-        const outcome = await productAddSender(
-          forLiveProductRoom(input.parsed, roomId),
-          shopCookieForAccount(input.parsed.cookieHeader, cookieHeader),
-        );
-        const result = { outcome, roomId, productCount: input.parsed.productIds.length };
+        const cookieHeader =
+          input.parsed.cookieHeader ??
+          decryptAccountCookie(account, accountConfig.encryptionKey, ownerId, input.accountId);
+        const outcome = await productAddSender(input.parsed, cookieHeader);
+        const result = {
+          outcome,
+          roomId: roomId ?? input.parsed.roomId,
+          productCount: input.parsed.productIds.length,
+        };
         if (outcome === 'rejected') return reply.status(422).send(result);
         if (outcome === 'unverified') return reply.status(202).send(result);
         return result;
@@ -277,18 +259,17 @@ export function createApp(
     return Boolean(await accountConfig.store.findEncrypted(ownerId, accountId));
   }
 
-  async function sendSavedSetToRoom(ownerId: string, saved: ProductSetInput, roomId: string) {
+  async function sendSavedSetToRoom(ownerId: string, saved: ProductSetInput) {
     if (!accountConfig || !saved.accountId) throw new Error('A connected account is required.');
     const account = await accountConfig.store.findEncrypted(ownerId, saved.accountId);
     if (!account) throw new Error('Account not found.');
-    const cookieHeader = decryptAccountCookie(
-      account,
-      accountConfig.encryptionKey,
-      ownerId,
-      saved.accountId,
-    );
-    const parsed = forLiveProductRoom(parseLiveProductAddCurl(saved.curl), roomId);
-    return productAddSender(parsed, shopCookieForAccount(parsed.cookieHeader, cookieHeader));
+    const parsed = parseLiveProductAddCurl(saved.curl);
+    // A copied Shop request can be signed over its body. Keep room_id and every
+    // signed field unchanged; selecting an account only identifies the LIVE room.
+    const cookieHeader =
+      parsed.cookieHeader ??
+      decryptAccountCookie(account, accountConfig.encryptionKey, ownerId, saved.accountId);
+    return productAddSender(parsed, cookieHeader);
   }
 
   app.get('/api/v1/live/product-sets', async (request, reply) => {
@@ -368,11 +349,17 @@ export function createApp(
       if (saved.accountId && liveService) {
         const roomId = await liveService.currentRoomId(ownerId, saved.accountId);
         await productSetStore.selectForLive(ownerId, id);
-        if (!roomId) {
+        const parsed = parseLiveProductAddCurl(saved.curl);
+        if (!roomId && !parsed.cookieHeader) {
           return { outcome: 'queued', roomId: '', productCount: saved.productIds.length };
         }
-        const outcome = await sendSavedSetToRoom(ownerId, saved, roomId);
-        const result = { outcome, roomId, productCount: saved.productIds.length };
+        const outcome = await sendSavedSetToRoom(ownerId, saved);
+        const result = {
+          outcome,
+          roomId: roomId ?? parsed.roomId,
+          productCount: saved.productIds.length,
+          queuedForLive: !roomId,
+        };
         if (outcome === 'rejected') return reply.status(422).send(result);
         if (outcome === 'unverified') return reply.status(202).send(result);
         return result;
@@ -591,7 +578,7 @@ export function createApp(
   });
 
   if (liveService)
-    registerLiveRoutes(app, liveService, ownerFromHeaders, async (ownerId, accountId, roomId) => {
+    registerLiveRoutes(app, liveService, ownerFromHeaders, async (ownerId, accountId) => {
       if (!productSetStore || !accountConfig) return 'none';
       const sets = await productSetStore.list(ownerId);
       const selected = sets.find((item) => item.accountId === accountId && item.autoApply);
@@ -599,7 +586,7 @@ export function createApp(
       const saved = await productSetStore.find(ownerId, selected.id);
       if (!saved) return 'none';
       try {
-        return await sendSavedSetToRoom(ownerId, saved, roomId);
+        return await sendSavedSetToRoom(ownerId, saved);
       } catch {
         return 'unverified';
       }

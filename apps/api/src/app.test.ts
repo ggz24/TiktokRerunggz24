@@ -391,7 +391,7 @@ test('named product sets stay owner-scoped and only send after the explicit acti
   await app.close();
 });
 
-test('a saved set waits before LIVE and targets the new room with its account session', async () => {
+test('a saved set uses the captured Shop request unchanged when linked to a LIVE account', async () => {
   const fixture = accountFixture(async () => ({
     userId: '1234567890123456789',
     username: 'sample.user',
@@ -432,9 +432,9 @@ test('a saved set waits before LIVE and targets the new room with its account se
     service,
     async (parsed, cookie) => {
       sends++;
-      assert.equal(parsed.roomId, roomId);
-      assert.equal(JSON.parse(parsed.body).room_id, roomId);
-      assert.equal(cookie, 'sessionid=fake-session-only; oec_lucifer=shop-only');
+      assert.equal(parsed.roomId, '');
+      assert.equal(JSON.parse(parsed.body).room_id, '');
+      assert.equal(cookie, 'sessionid=shop-session; oec_lucifer=shop-only');
       return 'accepted';
     },
     store,
@@ -457,19 +457,36 @@ test('a saved set waits before LIVE and targets the new room with its account se
     autoApply: false,
     createdAt: '2026-09-29T00:00:00.000Z',
     updatedAt: '2026-09-29T00:00:00.000Z',
-    curl: `${productCurl.replace('7681699623552076564', '')} -b 'sessionid=fake-session-only; oec_lucifer=shop-only'`,
+    curl: `${productCurl.replace('7681699623552076564', '')} -b 'sessionid=shop-session; oec_lucifer=shop-only'`,
   };
   const sendUrl = `/api/v1/live/product-sets/${setId}/send`;
   const queued = await app.inject({ method: 'POST', url: sendUrl, headers });
   assert.equal(queued.statusCode, 200);
-  assert.equal(queued.json().outcome, 'queued');
+  assert.equal(queued.json().outcome, 'accepted');
+  assert.equal(queued.json().queuedForLive, true);
   assert.equal(state.saved.autoApply, true);
-  assert.equal(sends, 0);
+  assert.equal(sends, 1);
+  const beforeLive = await app.inject({
+    method: 'POST',
+    url: '/api/v1/live/products/add',
+    headers,
+    payload: { curl: state.saved.curl, accountId },
+  });
+  assert.equal(beforeLive.statusCode, 200);
+  assert.equal(sends, 2);
   currentRoomId = roomId;
   const sent = await app.inject({ method: 'POST', url: sendUrl, headers });
   assert.equal(sent.statusCode, 200);
   assert.equal(sent.json().roomId, roomId);
-  assert.equal(sends, 1);
+  assert.equal(sends, 3);
+  const direct = await app.inject({
+    method: 'POST',
+    url: '/api/v1/live/products/add',
+    headers,
+    payload: { curl: state.saved.curl, accountId },
+  });
+  assert.equal(direct.statusCode, 200);
+  assert.equal(sends, 4);
   const started = await app.inject({
     method: 'POST',
     url: `/api/v1/live/sessions/${accountId}/start-auto`,
@@ -478,7 +495,7 @@ test('a saved set waits before LIVE and targets the new room with its account se
   });
   assert.equal(started.statusCode, 200);
   assert.equal(started.json().productsOutcome, 'accepted');
-  assert.equal(sends, 2);
+  assert.equal(sends, 5);
   await app.close();
 });
 

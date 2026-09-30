@@ -75,7 +75,7 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
             : 'ส่งชุดสินค้าไม่สำเร็จ',
         );
       }
-      const result = (await response.json()) as { outcome?: string };
+      const result = (await response.json()) as { outcome?: string; queuedForLive?: boolean };
       if (result.outcome === 'queued' || result.outcome === 'accepted') {
         setSets((current) =>
           current.map((set) => ({
@@ -88,7 +88,7 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
         result.outcome === 'queued'
           ? `บันทึกชุด “${item.name}” เพื่อส่งเข้าห้องใหม่เมื่อกดเริ่มไลฟ์`
           : result.outcome === 'accepted'
-            ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
+            ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว${result.queuedForLive ? ' และจะส่งซ้ำเมื่อเริ่มไลฟ์' : ''} ตรวจรายการใน Streamer Desktop`
             : `ส่งชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`,
       );
     } catch (caught) {
@@ -113,7 +113,7 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
                 <strong>{item.name}</strong>
                 <small>
                   {item.productIds.length} รายการ ·{' '}
-                  {item.accountId ? 'ผูกกับบัญชีนี้' : 'ใช้ Cookie ใน cURL'}
+                  {item.accountId ? 'ส่งซ้ำเมื่อบัญชีนี้เริ่ม LIVE' : 'ใช้ Cookie ใน cURL'}
                   {item.autoApply ? ' · ใช้เมื่อเริ่มไลฟ์' : ''}
                 </small>
               </div>

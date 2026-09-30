@@ -223,12 +223,12 @@ export default function ProductCurlPanel() {
     try {
       const response = await fetch(`/api/live/product-sets/${item.id}/send`, { method: 'POST' });
       if (!response.ok) throw new Error(await responseError(response));
-      const result = (await response.json()) as { outcome: string };
+      const result = (await response.json()) as { outcome: string; queuedForLive?: boolean };
       setNotice(
         result.outcome === 'queued'
           ? `บันทึกชุด “${item.name}” เพื่อส่งเข้าห้องใหม่เมื่อกดเริ่มไลฟ์`
           : result.outcome === 'accepted'
-            ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
+            ? `TikTok Shop ตอบรับชุด “${item.name}” แล้ว${result.queuedForLive ? ' และจะส่งซ้ำเมื่อเริ่มไลฟ์' : ''} ตรวจรายการใน Streamer Desktop`
             : `ส่งชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`,
       );
       await loadSets();
@@ -320,14 +320,14 @@ export default function ProductCurlPanel() {
             />
           </label>
           <label className="cyber-field">
-            บัญชี TikTok ที่เชื่อมต่อไว้
+            บัญชีที่จะให้ส่งชุดนี้ซ้ำเมื่อเริ่ม LIVE
             <select
               className="cyber-select"
               value={accountId}
               disabled={busy !== ''}
               onChange={(event) => setAccountId(event.target.value)}
             >
-              <option value="">ใช้ Cookie ใน cURL</option>
+              <option value="">ไม่ผูกบัญชี · ใช้ Cookie ใน cURL</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
                   {account.alias} {account.verifiedHandle ? `(@${account.verifiedHandle})` : ''}
@@ -335,6 +335,10 @@ export default function ProductCurlPanel() {
               ))}
             </select>
           </label>
+          <p>
+            หาก cURL มี Cookie ระบบจะใช้ Cookie จาก cURL ในการส่งสินค้าเสมอ บัญชีที่เลือกใช้กำหนดว่า
+            จะส่งชุดนี้ซ้ำเมื่อเริ่ม LIVE ของบัญชีใด
+          </p>
           <label className="cyber-field">
             cURL จาก TikTok Shop Streamer Desktop
             <textarea
