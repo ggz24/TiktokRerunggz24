@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { apiPath } from '@/lib/base-path';
 import { confirmDialog } from '@/lib/confirm';
+import RenewSessionDialog from './RenewSessionDialog';
 import '../app/cyber.css';
 
 type Page =
@@ -184,6 +185,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
   const [startingAccountId, setStartingAccountId] = useState<string | null>(null);
   const [stoppingAccountId, setStoppingAccountId] = useState<string | null>(null);
   const [brokenAvatars, setBrokenAvatars] = useState<Set<string>>(new Set());
+  const [renewAccountId, setRenewAccountId] = useState<string | null>(null);
   const [startError, setStartError] = useState<{ accountId: string; message: string } | null>(null);
   const streamLoadGeneration = useRef(0);
   useEffect(() => {
@@ -739,6 +741,34 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <RefreshCw size={13} />{' '}
             {verifyingAccountId === account.id ? 'กำลังตรวจ…' : 'ตรวจการเชื่อมต่อ'}
           </Btn>
+          <Btn
+            tone={disconnected ? 'pink' : 'default'}
+            onClick={() => setRenewAccountId(account.id)}
+            disabled={active}
+          >
+            อัปเดต session
+          </Btn>
+          {renewAccountId === account.id && (
+            <RenewSessionDialog
+              account={account}
+              onClose={() => setRenewAccountId(null)}
+              onDone={(item) => {
+                setRenewAccountId(null);
+                if (item && typeof item === 'object') {
+                  const updated = item as SavedAccount;
+                  setAccounts((current) =>
+                    current.map((entry) => (entry.id === updated.id ? updated : entry)),
+                  );
+                  setBrokenAvatars((current) => {
+                    const next = new Set(current);
+                    next.delete(updated.id);
+                    return next;
+                  });
+                }
+                notify('อัปเดต session แล้ว บัญชีเชื่อมต่อใหม่');
+              }}
+            />
+          )}
           {active || session?.hasOpenRoom ? (
             <Btn
               tone="danger"

@@ -59,6 +59,16 @@ export interface AccountStore {
   ): Promise<AccountMetadata | null>;
   delete(ownerId: string, id: string): Promise<boolean>;
   findEncrypted(ownerId: string, id: string): Promise<EncryptedAccountSecret | null>;
+  /** TikTok user ID last confirmed for this account; kept even after the session expires. */
+  getVerifiedUserId(ownerId: string, id: string): Promise<string | null>;
+  /** Replace the stored session of an existing account without touching its other settings. */
+  updateSession(
+    ownerId: string,
+    id: string,
+    session: EncryptedCookie & { userAgent?: EncryptedCookie },
+    claimedHandle: string | undefined,
+    identity: TikTokIdentity,
+  ): Promise<AccountMetadata | null>;
   setVerification(
     ownerId: string,
     id: string,

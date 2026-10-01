@@ -207,12 +207,49 @@ export function createPgAccountStore(pool: Pool): AccountStore {
       };
       return account;
     },
+    async getVerifiedUserId(ownerId, id) {
+      const result = await pool.query<{ verified_user_id: string | null }>(
+        'SELECT verified_user_id FROM livehub_account_imports WHERE owner_id = $1 AND id = $2',
+        [ownerId, id],
+      );
+      return result.rows[0]?.verified_user_id ?? null;
+    },
+    async updateSession(ownerId, id, session, claimedHandle, identity) {
+      const result = await pool.query<AccountRow>(
+        `UPDATE livehub_account_imports
+         SET cookie_ciphertext = $3, cookie_iv = $4, cookie_tag = $5,
+             user_agent_ciphertext = $6, user_agent_iv = $7, user_agent_tag = $8,
+             claimed_handle = COALESCE($9, claimed_handle),
+             verification_status = 'connected',
+             verified_username = $10,
+             verified_user_id = $11,
+             avatar_url = $12,
+             verified_at = NOW()
+         WHERE owner_id = $1 AND id = $2
+         RETURNING ${publicColumns}`,
+        [
+          ownerId,
+          id,
+          session.ciphertext,
+          session.iv,
+          session.tag,
+          session.userAgent?.ciphertext ?? null,
+          session.userAgent?.iv ?? null,
+          session.userAgent?.tag ?? null,
+          claimedHandle ?? null,
+          identity.username,
+          identity.userId,
+          identity.avatarUrl ?? null,
+        ],
+      );
+      return result.rows[0] ? metadata(result.rows[0]) : null;
+    },
     async setVerification(ownerId, id, identity) {
       const result = await pool.query<AccountRow>(
         `UPDATE livehub_account_imports
          SET verification_status = $3,
              verified_username = $4,
-             verified_user_id = $5,
+             verified_user_id = COALESCE($5, verified_user_id),
              avatar_url = $6,
              verified_at = CASE WHEN $3 = 'connected' THEN NOW() ELSE NULL END
          WHERE owner_id = $1 AND id = $2

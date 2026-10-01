@@ -567,6 +567,86 @@ export function createApp(
     }
   });
 
+  app.post('/api/v1/accounts/:id/session', { bodyLimit: 70_000 }, async (request, reply) => {
+    if (!accountConfig) return reply.status(503).send({ error: 'Account import is unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { id } = request.params as { id?: string };
+    if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid account ID.' });
+    const body = request.body;
+    if (
+      typeof body !== 'object' ||
+      body === null ||
+      Array.isArray(body) ||
+      Object.keys(body).some((key) => !['curl', 'sessionid'].includes(key))
+    ) {
+      return reply.status(400).send({ error: 'Invalid session request.' });
+    }
+    const values = body as Record<string, unknown>;
+    if ((typeof values.curl === 'string') === (typeof values.sessionid === 'string')) {
+      return reply.status(400).send({ error: 'Invalid session request.' });
+    }
+    let parsed: Pick<
+      ReturnType<typeof parseAccountImportCurl>,
+      'cookieHeader' | 'userAgent' | 'claimedHandle'
+    >;
+    if (typeof values.sessionid === 'string') {
+      if (!/^[A-Za-z0-9._~%-]{16,512}$/.test(values.sessionid)) {
+        return reply.status(400).send({ error: 'Invalid TikTok session ID.' });
+      }
+      parsed = { cookieHeader: `sessionid=${values.sessionid}` };
+    } else {
+      if (typeof values.curl !== 'string' || !values.curl || values.curl.length > 64_000) {
+        return reply.status(400).send({ error: 'Invalid session cURL.' });
+      }
+      try {
+        parsed = parseAccountImportCurl(values.curl);
+      } catch {
+        return reply.status(400).send({ error: 'Invalid session cURL.' });
+      }
+    }
+    try {
+      if (!(await accountConfig.store.findEncrypted(ownerId, id))) {
+        return reply.status(404).send({ error: 'Account not found.' });
+      }
+      const identity = await (accountConfig.identityLookup ?? lookupTikTokIdentity)(
+        parsed.cookieHeader,
+        parsed.userAgent,
+      );
+      if (!identity) {
+        return reply.status(422).send({ error: 'TikTok session is not authenticated.' });
+      }
+      // A card keeps its live settings, so it must not be pointed at a different TikTok account.
+      const known = await accountConfig.store.getVerifiedUserId(ownerId, id);
+      if (known && known !== identity.userId) {
+        return reply.status(409).send({ error: 'Session belongs to a different TikTok account.' });
+      }
+      const item = await accountConfig.store.updateSession(
+        ownerId,
+        id,
+        {
+          ...encryptAccountCookie(parsed.cookieHeader, accountConfig.encryptionKey, ownerId, id),
+          ...(parsed.userAgent === undefined
+            ? {}
+            : {
+                userAgent: encryptAccountUserAgent(
+                  parsed.userAgent,
+                  accountConfig.encryptionKey,
+                  ownerId,
+                  id,
+                ),
+              }),
+        },
+        parsed.claimedHandle,
+        identity,
+      );
+      if (!item) return reply.status(404).send({ error: 'Account not found.' });
+      return { item };
+    } catch {
+      return reply.status(503).send({ error: 'TikTok account check is unavailable.' });
+    }
+  });
+
   app.patch('/api/v1/accounts/:id', async (request, reply) => {
     if (!accountConfig)
       return reply.status(503).send({ error: 'Account settings are unavailable.' });

@@ -126,6 +126,29 @@ function accountFixture(identityLookup: IdentityLookup) {
           ...(row.userAgent ? { userAgent: row.userAgent } : {}),
         };
       },
+      getVerifiedUserId: async (ownerId: string, id: string) =>
+        rows.find((item) => item.ownerId === ownerId && item.id === id)?.verifiedUserId ?? null,
+      updateSession: async (
+        ownerId: string,
+        id: string,
+        session: Pick<StoredAccount, 'ciphertext' | 'iv' | 'tag' | 'userAgent'>,
+        claimedHandle: string | undefined,
+        identity: NonNullable<Awaited<ReturnType<IdentityLookup>>>,
+      ) => {
+        const row = rows.find((item) => item.ownerId === ownerId && item.id === id);
+        if (!row) return null;
+        row.ciphertext = session.ciphertext;
+        row.iv = session.iv;
+        row.tag = session.tag;
+        row.userAgent = session.userAgent;
+        if (claimedHandle) row.claimedHandle = claimedHandle;
+        row.verificationStatus = 'connected';
+        row.verifiedAt = new Date().toISOString();
+        row.verifiedHandle = identity.username;
+        row.verifiedUserId = identity.userId;
+        row.avatarUrl = identity.avatarUrl;
+        return metadata(row);
+      },
       setVerification: async (
         ownerId: string,
         id: string,
@@ -142,7 +165,6 @@ function accountFixture(identityLookup: IdentityLookup) {
         } else {
           row.verifiedAt = undefined;
           row.verifiedHandle = undefined;
-          row.verifiedUserId = undefined;
           row.avatarUrl = undefined;
         }
         return metadata(row);
@@ -1065,4 +1087,60 @@ test('identity lookup prefers the current profile picture over the older account
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('an expired account session can be renewed in place, but only with the same TikTok account', async () => {
+  let current: { userId: string; username: string } | null = {
+    userId: '1234567890123456789',
+    username: 'sample.user',
+  };
+  const fixture = accountFixture(async () => current);
+  const app = createApp(
+    { postgres: async () => {}, redis: async () => {}, worker: async () => true },
+    fixture.config,
+  );
+  const imported = await app.inject({
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
+    payload: { alias: 'Keep my name', curl: syntheticCurl },
+  });
+  const accountId = imported.json().item.id as string;
+  const url = `/api/v1/accounts/${accountId}/session`;
+  const renew = (payload: object, extra: Record<string, string> = {}) =>
+    app.inject({ method: 'POST', url, headers: { ...headers, ...extra }, payload });
+  current = null;
+  const verified = await app.inject({
+    method: 'POST',
+    url: `/api/v1/accounts/${accountId}/verify`,
+    headers,
+  });
+  assert.equal(verified.json().item.verificationStatus, 'disconnected');
+  assert.equal((await app.inject({ method: 'POST', url, payload: {} })).statusCode, 401);
+  assert.equal(
+    (await renew({ sessionid: 'abcdef1234567890abcdef' }, { 'x-livehub-owner': 'owner-2' }))
+      .statusCode,
+    404,
+  );
+  assert.equal((await renew({})).statusCode, 400);
+  assert.equal(
+    (await renew({ curl: syntheticCurl, sessionid: 'abcdef1234567890abcdef' })).statusCode,
+    400,
+  );
+  assert.equal((await renew({ sessionid: 'abcdef1234567890abcdef' })).statusCode, 422);
+  current = { userId: '9999999999999999999', username: 'someone.else' };
+  const wrong = await renew({ sessionid: 'abcdef1234567890abcdef' });
+  assert.equal(wrong.statusCode, 409);
+  assert.equal(fixture.rows[0].verificationStatus, 'disconnected');
+  current = { userId: '1234567890123456789', username: 'sample.user' };
+  const renewed = await renew({ sessionid: 'newsession1234567890abcdef' });
+  assert.equal(renewed.statusCode, 200);
+  assert.equal(renewed.json().item.verificationStatus, 'connected');
+  assert.equal(renewed.json().item.alias, 'Keep my name');
+  assert.equal(renewed.body.includes('newsession'), false);
+  assert.equal(
+    decryptAccountCookie(fixture.rows[0], fixture.key, 'owner-1', accountId),
+    'sessionid=newsession1234567890abcdef',
+  );
+  await app.close();
 });
