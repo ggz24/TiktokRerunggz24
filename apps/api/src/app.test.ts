@@ -1016,3 +1016,53 @@ test('identity lookup falls back to the public profile when account info has no 
     globalThis.fetch = realFetch;
   }
 });
+
+test('identity lookup prefers the current profile picture over the older account-info one', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes('/passport/web/account/info/')) {
+      return Response.json(
+        {
+          data: {
+            user_id_str: '1234567890123456',
+            username: 'sample.user',
+            avatar_url: 'https://p16-amd-va.tiktokcdn.com/old-thumb.jpeg',
+          },
+        },
+        { headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response(
+      '{"avatarLarger":"https:\\u002F\\u002Fp19-common-sign.tiktokcdn.com\\u002Fnew.jpeg"}',
+    );
+  }) as typeof fetch;
+  try {
+    const identity = await lookupTikTokIdentity('sessionid=abc');
+    assert.equal(identity?.avatarUrl, 'https://p19-common-sign.tiktokcdn.com/new.jpeg');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  // When the profile page cannot be read, the account-info picture is still used.
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    if (String(input).includes('/passport/web/account/info/')) {
+      return Response.json(
+        {
+          data: {
+            user_id_str: '1234567890123456',
+            username: 'sample.user',
+            avatar_url: 'https://p16-amd-va.tiktokcdn.com/old-thumb.jpeg',
+          },
+        },
+        { headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response('blocked', { status: 403 });
+  }) as typeof fetch;
+  try {
+    const identity = await lookupTikTokIdentity('sessionid=abc');
+    assert.equal(identity?.avatarUrl, 'https://p16-amd-va.tiktokcdn.com/old-thumb.jpeg');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

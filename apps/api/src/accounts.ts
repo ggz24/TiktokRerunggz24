@@ -249,9 +249,12 @@ export async function lookupTikTokIdentity(
     }
   }
   // The account-info response often leaves avatar_url empty; the public profile has the picture.
-  avatarUrl ??= await publicProfileAvatar(username, userAgent ?? fallbackUserAgent);
+  // The account-info picture can be an old thumbnail, so the profile page wins when it has one.
   // Some profiles only show their picture to a logged-in viewer; use the account's own session.
-  avatarUrl ??= await publicProfileAvatar(username, userAgent ?? fallbackUserAgent, cookieHeader);
+  const profileAvatar =
+    (await publicProfileAvatar(username, userAgent ?? fallbackUserAgent)) ??
+    (await publicProfileAvatar(username, userAgent ?? fallbackUserAgent, cookieHeader));
+  avatarUrl = profileAvatar ?? avatarUrl;
   return { userId: String(userId), username, ...(avatarUrl ? { avatarUrl } : {}) };
 }
 
