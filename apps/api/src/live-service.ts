@@ -642,7 +642,11 @@ export class LiveService {
       let room: Awaited<ReturnType<AutoRoomCreator>>;
       try {
         room = await this.autoRoomCreator({ title: title.trim(), cookieHeader, userAgent });
-      } catch {
+      } catch (error) {
+        console.error(
+          '[live] room creation failed:',
+          error instanceof Error ? error.message : 'unknown error',
+        );
         throw new LiveError(
           502,
           'TikTok did not create a LIVE room. Check the session and signer setup.',
