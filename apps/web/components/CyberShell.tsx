@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { apiPath } from '@/lib/base-path';
+import { confirmDialog } from '@/lib/confirm';
 import '../app/cyber.css';
 
 type Page =
@@ -367,7 +368,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
   }
   async function stopAccountStream(account: SavedAccount) {
     if (stoppingAccountId) return;
-    if (!window.confirm('ลงไลฟ์บัญชีนี้? ระบบจะหยุดวิดีโอและสั่งปิดห้องบน TikTok')) return;
+    if (!(await confirmDialog('ลงไลฟ์บัญชีนี้? ระบบจะหยุดวิดีโอและสั่งปิดห้องบน TikTok'))) return;
     setStoppingAccountId(account.id);
     setStartError(null);
     try {

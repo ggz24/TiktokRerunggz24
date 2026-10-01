@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Play, RefreshCw, Settings, Square, Upload, X } from 'lucide-react';
 import { maxVideoBytes, uploadMp4 } from '@/lib/video-upload';
 import { apiPath } from '@/lib/base-path';
+import { confirmDialog } from '@/lib/confirm';
 
 type LiveAccount = {
   id: string;
@@ -316,7 +317,7 @@ export default function LiveSessionPanel({
   }
 
   async function deleteVideo(video: LiveVideo) {
-    if (busy || !window.confirm(`ลบวิดีโอ “${video.name}” ออกจากระบบ?`)) return;
+    if (busy || !(await confirmDialog(`ลบวิดีโอ “${video.name}” ออกจากระบบ?`))) return;
     setBusy('delete');
     setDeletingVideoId(video.id);
     setError('');

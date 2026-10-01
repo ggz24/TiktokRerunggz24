@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiPath } from '@/lib/base-path';
+import { confirmDialog } from '@/lib/confirm';
 
 type Account = {
   id: string;
@@ -217,9 +218,9 @@ export default function ProductCurlPanel() {
       return;
     }
     if (
-      !window.confirm(
+      !(await confirmDialog(
         `ส่งสินค้า ${preview.productIds.length} รายการเข้า TikTok Shop Streamer Desktop จริงหรือไม่?`,
-      )
+      ))
     )
       return;
     setBusy('send');
@@ -248,9 +249,9 @@ export default function ProductCurlPanel() {
   async function sendSaved(item: ProductSet) {
     if (
       busy ||
-      !window.confirm(
+      !(await confirmDialog(
         `ส่งชุด “${item.name}” (${item.productIds.length} รายการ) เข้า TikTok Shop Streamer Desktop จริงหรือไม่?`,
-      )
+      ))
     )
       return;
     setBusy(item.id);
@@ -280,9 +281,9 @@ export default function ProductCurlPanel() {
   async function removeFromLive(item: ProductSet) {
     if (
       busy ||
-      !window.confirm(
+      !(await confirmDialog(
         `ลบสินค้า ${item.productIds.length} รายการของชุด “${item.name}” ออกจากตะกร้า LIVE จริงหรือไม่?`,
-      )
+      ))
     )
       return;
     setBusy(item.id);
@@ -307,7 +308,7 @@ export default function ProductCurlPanel() {
   }
 
   async function deleteSet(item: ProductSet) {
-    if (busy || !window.confirm(`ลบชุดสินค้า “${item.name}” หรือไม่?`)) return;
+    if (busy || !(await confirmDialog(`ลบชุดสินค้า “${item.name}” หรือไม่?`))) return;
     setBusy(item.id);
     setError('');
     setNotice('');

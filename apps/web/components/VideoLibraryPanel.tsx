@@ -10,6 +10,7 @@ import {
   uploadMp4,
 } from '@/lib/video-upload';
 import { apiPath } from '@/lib/base-path';
+import { confirmDialog } from '@/lib/confirm';
 
 function sizeLabel(bytes: number) {
   return bytes >= 1024 ** 3
@@ -96,7 +97,7 @@ export default function VideoLibraryPanel() {
   }
 
   async function remove(video: StoredVideo) {
-    if (busy || !window.confirm(`ลบ ${video.name} ออกจากคลังวิดีโอ?`)) return;
+    if (busy || !(await confirmDialog(`ลบ ${video.name} ออกจากคลังวิดีโอ?`))) return;
     setBusy('delete');
     setError('');
     setNotice('');

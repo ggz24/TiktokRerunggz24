@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { apiPath } from '@/lib/base-path';
+import { confirmDialog } from '@/lib/confirm';
 
 type ProductSet = {
   id: string;
@@ -56,9 +57,9 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
         ? 'ชุดนี้ไม่ได้ผูกกับบัญชีบนการ์ด ตรวจว่า Cookie ใน cURL เป็นบัญชีที่ต้องการ\n'
         : '';
     if (
-      !window.confirm(
+      !(await confirmDialog(
         `${accountWarning}ส่งชุด “${item.name}” (${item.productIds.length} รายการ) เข้า TikTok Shop Streamer Desktop จริงหรือไม่?`,
-      )
+      ))
     )
       return;
     setSendingId(item.id);
@@ -105,9 +106,9 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
   async function remove(item: ProductSet) {
     if (sendingId) return;
     if (
-      !window.confirm(
+      !(await confirmDialog(
         `ลบสินค้า ${item.productIds.length} รายการของชุด “${item.name}” ออกจากตะกร้า LIVE จริงหรือไม่?`,
-      )
+      ))
     )
       return;
     setSendingId(item.id);
