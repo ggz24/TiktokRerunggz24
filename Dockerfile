@@ -15,6 +15,7 @@ FROM source AS web
 ARG NEXT_PUBLIC_BASE_PATH=""
 ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
 RUN npm run build:web
+ENV NODE_OPTIONS="--require /app/scripts/http-timeouts.cjs"
 EXPOSE 3100
 CMD ["npm", "run", "start:web"]
 
