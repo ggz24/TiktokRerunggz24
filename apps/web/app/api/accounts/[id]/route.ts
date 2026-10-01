@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
+import { isSameOrigin } from '@/lib/origin';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,7 @@ async function readSettingsBody(request: Request): Promise<unknown> {
 async function authorize(request: Request, context: { params: Promise<{ id: string }> }) {
   const username = await currentUser();
   if (!username) return { response: error('กรุณาเข้าสู่ระบบ', 401) };
-  if (request.headers.get('origin') !== new URL(request.url).origin) {
+  if (!isSameOrigin(request)) {
     return { response: error('คำขอไม่ถูกต้อง', 403) };
   }
   const token = process.env.INTERNAL_API_TOKEN;

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
+import { isSameOrigin } from '@/lib/origin';
 
 const noStore = { 'Cache-Control': 'no-store' };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,7 +20,7 @@ export async function proxyProductSet(
 ) {
   const username = await currentUser();
   if (!username) return error('กรุณาเข้าสู่ระบบ', 401);
-  if (method !== 'GET' && request.headers.get('origin') !== new URL(request.url).origin) {
+  if (method !== 'GET' && !isSameOrigin(request)) {
     return error('คำขอไม่ถูกต้อง', 403);
   }
   const token = process.env.INTERNAL_API_TOKEN;

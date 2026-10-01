@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
+import { isSameOrigin } from '@/lib/origin';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,8 +49,7 @@ export async function POST(request: Request) {
   if (!username) {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401, headers: noStore });
   }
-  const origin = request.headers.get('origin');
-  if (origin !== new URL(request.url).origin) {
+  if (!isSameOrigin(request)) {
     return NextResponse.json({ error: 'คำขอไม่ถูกต้อง' }, { status: 403, headers: noStore });
   }
   if (!request.headers.get('content-type')?.startsWith('application/json')) {

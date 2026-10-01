@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
+import { isSameOrigin } from '@/lib/origin';
 
 export const dynamic = 'force-dynamic';
 const noStore = { 'Cache-Control': 'no-store' };
@@ -11,7 +12,7 @@ function error(message: string, status: number) {
 export async function POST(request: Request) {
   const username = await currentUser();
   if (!username) return error('กรุณาเข้าสู่ระบบ', 401);
-  if (request.headers.get('origin') !== new URL(request.url).origin) {
+  if (!isSameOrigin(request)) {
     return error('คำขอไม่ถูกต้อง', 403);
   }
   if (!request.headers.get('content-type')?.startsWith('application/json')) {

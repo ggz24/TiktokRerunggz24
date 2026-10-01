@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
+import { isSameOrigin } from '@/lib/origin';
 
 export const noStore = { 'Cache-Control': 'no-store' };
 export const accountIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -11,7 +12,7 @@ export function liveError(message: string, status: number) {
 export async function liveAuthorization(request: Request, mutation: boolean) {
   const username = await currentUser();
   if (!username) return { response: liveError('กรุณาเข้าสู่ระบบ', 401) };
-  if (mutation && request.headers.get('origin') !== new URL(request.url).origin) {
+  if (mutation && !isSameOrigin(request)) {
     return { response: liveError('คำขอไม่ถูกต้อง', 403) };
   }
   const token = process.env.INTERNAL_API_TOKEN;
