@@ -4,7 +4,9 @@ import { createApp } from './app.js';
 import { createPgAccountStore, ensureAccountTable } from './account-store.js';
 import { parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
 import { createPgLiveStore, ensureLiveTables } from './live-store.js';
-import { LiveService } from './live-service.js';
+import { promises as fsPromises } from 'node:fs';
+import { createCloudTranscoder } from './cloud-transcode.js';
+import { defaultConvertVideo, LiveService } from './live-service.js';
 import { AutoLiveManager, ensureAutoLiveTable } from './auto-live.js';
 import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
 import {
@@ -98,6 +100,13 @@ if (accountConfig) {
           createRapidApiRoomSigner(rapidApiKey),
         )
     : undefined;
+  const transcodeBucket = process.env.TRANSCODE_BUCKET?.trim();
+  const cloudTranscode = transcodeBucket
+    ? createCloudTranscoder({
+        bucket: transcodeBucket,
+        location: process.env.TRANSCODE_LOCATION || undefined,
+      })
+    : undefined;
   liveService = new LiveService(
     createPgLiveStore(pool),
     accountConfig.store,
@@ -124,6 +133,21 @@ if (accountConfig) {
           )
       : undefined,
     maxConcurrentLive,
+    transcodeBucket
+      ? async (source, destination, signal) => {
+          try {
+            await cloudTranscode!(source, destination, signal);
+          } catch (error) {
+            if (signal?.aborted) throw error;
+            console.error(
+              '[live] cloud transcode failed, using local ffmpeg:',
+              error instanceof Error ? error.message : 'unknown error',
+            );
+            await fsPromises.rm(destination, { force: true });
+            await defaultConvertVideo(source, destination, signal);
+          }
+        }
+      : undefined,
   );
   void liveService.recoverUploads().catch(() => undefined);
   autoLive = new AutoLiveManager(pool, liveService, accountConfig.store);
