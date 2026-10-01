@@ -346,6 +346,16 @@ test('named product sets stay owner-scoped and only send after the explicit acti
   assert.equal(listed.json().items.length, 1);
   assert.equal(listed.body.includes('sessionid'), false);
   const otherHeaders = { ...headers, 'x-livehub-owner': 'owner-2' };
+  const detailUrl = `/api/v1/live/product-sets/${setId}`;
+  assert.equal((await app.inject({ method: 'GET', url: detailUrl })).statusCode, 401);
+  assert.equal(
+    (await app.inject({ method: 'GET', url: detailUrl, headers: otherHeaders })).statusCode,
+    404,
+  );
+  const detail = await app.inject({ method: 'GET', url: detailUrl, headers });
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.json().item.curl, savedCurl);
+  assert.equal(detail.json().item.deleteCurl, null);
   assert.equal(
     (
       await app.inject({ method: 'GET', url: '/api/v1/live/product-sets', headers: otherHeaders })

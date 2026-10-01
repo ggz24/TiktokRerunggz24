@@ -37,6 +37,7 @@ export default function ProductCurlPanel() {
   const [accountId, setAccountId] = useState('');
   const [curl, setCurl] = useState('');
   const [deleteCurl, setDeleteCurl] = useState('');
+  const [savedLoaded, setSavedLoaded] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -92,21 +93,44 @@ export default function ProductCurlPanel() {
     setAccountId('');
     setCurl('');
     setDeleteCurl('');
+    setSavedLoaded(false);
     setPreview(null);
   }
 
-  function editSet(item: ProductSet) {
+  async function editSet(item: ProductSet) {
     setEditingId(item.id);
     setName(item.name);
     setAccountId(item.accountId ?? '');
     setCurl('');
     setDeleteCurl('');
+    setSavedLoaded(false);
     setPreview({ roomId: item.roomId, productIds: item.productIds, hasCookie: item.hasCookie });
     setError('');
-    setNotice('แก้ชื่อได้ทันที หาก cURL หมดอายุ ให้วาง cURL ใหม่แล้วตรวจรายการก่อนบันทึก');
+    setNotice('กำลังโหลด cURL ที่บันทึกไว้…');
     document
       .getElementById('product-set-editor')
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    try {
+      const response = await fetch(apiPath(`/api/live/product-sets/${item.id}`), {
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const result: unknown = await response.json();
+      const saved =
+        result && typeof result === 'object' && 'item' in result
+          ? (result.item as { curl?: unknown; deleteCurl?: unknown })
+          : null;
+      if (typeof saved?.curl !== 'string') throw new Error('อ่าน cURL ที่บันทึกไว้ไม่สำเร็จ');
+      setCurl(saved.curl);
+      setDeleteCurl(typeof saved.deleteCurl === 'string' ? saved.deleteCurl : '');
+      setSavedLoaded(true);
+      setNotice(
+        'แสดง cURL ที่บันทึกไว้แล้ว (มีคุกกี้/โทเค็น อย่าแชร์หน้าจอ) แก้ได้ทันที หาก cURL หมดอายุให้วางอันใหม่แล้วตรวจรายการก่อนบันทึก',
+      );
+    } catch (caught) {
+      setNotice('');
+      setError(caught instanceof Error ? caught.message : 'โหลด cURL ที่บันทึกไว้ไม่สำเร็จ');
+    }
   }
 
   async function previewCurl() {
@@ -167,7 +191,11 @@ export default function ProductCurlPanel() {
             name: name.trim(),
             accountId: accountId || null,
             ...(curl.trim() ? { curl } : {}),
-            ...(deleteCurl.trim() ? { deleteCurl } : {}),
+            ...(deleteCurl.trim()
+              ? { deleteCurl }
+              : savedLoaded && sets.find((set) => set.id === editingId)?.hasDelete
+                ? { deleteCurl: null }
+                : {}),
           }),
         },
       );
@@ -341,7 +369,7 @@ export default function ProductCurlPanel() {
                   type="button"
                   className="cyber-btn secondary"
                   disabled={busy !== ''}
-                  onClick={() => editSet(item)}
+                  onClick={() => void editSet(item)}
                 >
                   ✎ แก้ไข
                 </button>
@@ -404,14 +432,14 @@ export default function ProductCurlPanel() {
               }}
               placeholder={
                 editingId
-                  ? 'ปล่อยว่างเพื่อใช้ cURL เดิม หรือวาง cURL ใหม่เพื่อเปลี่ยนรายการสินค้า'
+                  ? 'cURL เดิมจะแสดงที่นี่ หรือวาง cURL ใหม่เพื่อเปลี่ยนรายการสินค้า'
                   : "curl --url 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/add?...' ..."
               }
             />
           </label>
           <p>
-            cURL ที่บันทึกเข้ารหัสไว้และไม่แสดงกลับบนหน้าเว็บ เมื่อ token หมดอายุ ให้กดแก้ไขแล้ววาง
-            cURL ใหม่
+            cURL ที่บันทึกเก็บเข้ารหัสไว้ในระบบ และจะแสดงในช่องนี้เมื่อกดแก้ไขชุด (มีคุกกี้และ token
+            อย่าแชร์หน้าจอ) เมื่อ token หมดอายุ ให้วาง cURL ใหม่ทับแล้วตรวจรายการก่อนบันทึก
           </p>
           <label className="cyber-field">
             cURL ลบสินค้า (ไม่บังคับ) จาก <code>live_product/delete</code>
@@ -423,7 +451,7 @@ export default function ProductCurlPanel() {
               onChange={(event) => setDeleteCurl(event.target.value)}
               placeholder={
                 editingId
-                  ? 'ปล่อยว่างเพื่อใช้คำสั่งลบเดิม หรือวาง cURL ลบใหม่ (ต้องเป็นสินค้าชุดเดียวกับ cURL เพิ่ม)'
+                  ? 'cURL ลบเดิมจะแสดงที่นี่ ล้างช่องนี้เพื่อเลิกใช้คำสั่งลบ หรือวาง cURL ลบใหม่ (ต้องเป็นสินค้าชุดเดียวกับ cURL เพิ่ม)'
                   : "curl --url 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/delete?...' ..."
               }
             />

@@ -311,6 +311,21 @@ export function createApp(
     }
   });
 
+  app.get('/api/v1/live/product-sets/:id', async (request, reply) => {
+    if (!productSetStore) return reply.status(503).send({ error: 'Product sets are unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { id } = request.params as { id: string };
+    if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid product set ID.' });
+    try {
+      const saved = await productSetStore.find(ownerId, id);
+      if (!saved) return reply.status(404).send({ error: 'Product set not found.' });
+      return { item: saved };
+    } catch {
+      return reply.status(503).send({ error: 'Product set is unavailable.' });
+    }
+  });
+
   app.post('/api/v1/live/product-sets', { bodyLimit: 110_000 }, async (request, reply) => {
     if (!productSetStore) return reply.status(503).send({ error: 'Product sets are unavailable.' });
     const ownerId = ownerFromHeaders(request.headers);
