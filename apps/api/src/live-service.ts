@@ -163,6 +163,15 @@ function validStreamKey(input: unknown): input is string {
   );
 }
 
+/** Last lines of FFmpeg stderr for server logs, with push URLs and long tokens removed. */
+function safeStderr(stderr: string): string {
+  return stderr
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>')
+    .replace(/[A-Za-z0-9_\-=?&%.]{24,}/g, '<redacted>')
+    .trim()
+    .slice(-500);
+}
+
 // FFmpeg can include the entire push URL (including the stream key) in stderr.
 // Only return fixed messages inferred from it; never persist or return raw output.
 function streamFailure(stderr: string): string {
@@ -1175,8 +1184,13 @@ export class LiveService {
           streamId: null,
         });
       }
+      console.info('[live] room end result', { result });
       return result;
-    } catch {
+    } catch (error) {
+      console.error(
+        '[live] room end failed:',
+        error instanceof Error ? error.message : 'unknown error',
+      );
       return 'unverified';
     }
   }
@@ -1298,9 +1312,16 @@ export class LiveService {
           ? undefined
           : (state.error ?? 'Streaming process could not start.');
       });
-      child.once('exit', () => {
+      child.once('exit', (code, signal) => {
         if (state.stopTimer) clearTimeout(state.stopTimer);
         if (state.startupTimer) clearTimeout(state.startupTimer);
+        if (!state.cancelled) {
+          console.error('[live] stream process exited', {
+            code,
+            signal,
+            detail: safeStderr(stderr),
+          });
+        }
         state.status = state.cancelled ? 'idle' : 'failed';
         state.error = state.cancelled ? undefined : (state.error ?? streamFailure(stderr));
         state.child = undefined;

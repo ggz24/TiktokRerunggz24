@@ -29,6 +29,7 @@ export const sendLiveProductAdd: ProductAddSender = async (request, cookieHeader
     cache: 'no-store',
     signal: AbortSignal.timeout(20_000),
   });
+  const target = new URL(request.url).pathname.split('/').pop();
   if (!response.ok) {
     console.warn('TikTok Shop product add rejected HTTP request', { status: response.status });
     return 'rejected';
@@ -39,11 +40,21 @@ export const sendLiveProductAdd: ProductAddSender = async (request, cookieHeader
   try {
     result = await response.json();
   } catch {
+    console.info('TikTok Shop request returned a non-JSON body', {
+      action: target,
+      status: response.status,
+    });
     return 'unverified';
   }
   if (!result || typeof result !== 'object' || Array.isArray(result)) return 'unverified';
   const data = result as Record<string, unknown>;
   const code = data.code ?? data.status_code;
+  console.info('TikTok Shop request completed', {
+    action: target,
+    status: response.status,
+    code: typeof code === 'number' || typeof code === 'string' ? String(code).slice(0, 12) : null,
+    success: typeof data.success === 'boolean' ? data.success : null,
+  });
   if (code === 0 || code === '0' || data.success === true) return 'accepted';
   if (code !== undefined || data.success === false) {
     // Only record an integer code. Response messages may contain account or request details.
