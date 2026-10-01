@@ -63,6 +63,66 @@ export function registerLiveRoutes(
     }
   });
 
+  app.post('/api/v1/live/uploads', { bodyLimit: 4_096 }, async (request, reply) => {
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const body = (request.body ?? {}) as { name?: unknown; size?: unknown };
+    try {
+      return reply.status(201).send(await service.createUpload(ownerId, body.name, body.size));
+    } catch (error) {
+      return failure(reply, error);
+    }
+  });
+
+  app.get('/api/v1/live/uploads/:uploadId', async (request, reply) => {
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { uploadId } = request.params as { uploadId: string };
+    try {
+      return await service.uploadStatus(ownerId, uploadId);
+    } catch (error) {
+      return failure(reply, error);
+    }
+  });
+
+  app.put('/api/v1/live/uploads/:uploadId/chunks/:index', async (request, reply) => {
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { uploadId, index } = request.params as { uploadId: string; index: string };
+    if (!request.body || typeof (request.body as Readable).pipe !== 'function') {
+      return reply.status(415).send({ error: 'Send the chunk as application/octet-stream.' });
+    }
+    try {
+      await service.writeUploadChunk(ownerId, uploadId, Number(index), request.body as Readable);
+      return reply.status(200).send({ ok: true });
+    } catch (error) {
+      return failure(reply, error);
+    }
+  });
+
+  app.post('/api/v1/live/uploads/:uploadId/complete', async (request, reply) => {
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { uploadId } = request.params as { uploadId: string };
+    try {
+      return reply.status(201).send({ item: await service.completeUpload(ownerId, uploadId) });
+    } catch (error) {
+      return failure(reply, error);
+    }
+  });
+
+  app.delete('/api/v1/live/uploads/:uploadId', async (request, reply) => {
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { uploadId } = request.params as { uploadId: string };
+    try {
+      await service.cancelUpload(ownerId, uploadId);
+      return reply.status(204).send();
+    } catch (error) {
+      return failure(reply, error);
+    }
+  });
+
   app.delete('/api/v1/live/videos/:videoId', async (request, reply) => {
     const ownerId = ownerFromHeaders(request.headers);
     if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });

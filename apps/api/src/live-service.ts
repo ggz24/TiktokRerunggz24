@@ -297,7 +297,42 @@ export async function defaultConvertVideo(source: string, destination: string): 
   });
 }
 
+const UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024;
+const UPLOAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_ACTIVE_UPLOADS = 3;
+
+type ChunkedUpload = {
+  id: string;
+  ownerId: string;
+  name: string;
+  size: number;
+  chunkSize: number;
+  total: number;
+  received: Set<number>;
+  saving: Promise<void>;
+  completing?: boolean;
+};
+
+export type ChunkedUploadInfo = {
+  uploadId: string;
+  size: number;
+  chunkSize: number;
+  total: number;
+  received: number[];
+};
+
+function uploadInfo(upload: ChunkedUpload): ChunkedUploadInfo {
+  return {
+    uploadId: upload.id,
+    size: upload.size,
+    chunkSize: upload.chunkSize,
+    total: upload.total,
+    received: [...upload.received].sort((a, b) => a - b),
+  };
+}
+
 export class LiveService {
+  private readonly chunkedUploads = new Map<string, ChunkedUpload>();
   private readonly processes = new Map<string, RunningProcess>();
   private readonly openingRooms = new Set<string>();
   private readonly deletingAccounts = new Set<string>();
@@ -387,9 +422,7 @@ export class LiveService {
     }
     await fs.mkdir(this.mediaDir, { recursive: true });
     const id = randomUUID();
-    const finalPath = mediaPath(this.mediaDir, id);
-    const temporaryPath = `${finalPath}.upload`;
-    const convertedPath = `${finalPath}.converted.mp4`;
+    const temporaryPath = `${mediaPath(this.mediaDir, id)}.upload`;
     let size = 0;
     try {
       const limiter = new Transform({
@@ -403,6 +436,33 @@ export class LiveService {
         },
       });
       await pipeline(input, limiter, createWriteStream(temporaryPath, { flags: 'wx' }));
+      return await this.finalizeUpload(ownerId, name, id, size, usage.bytes);
+    } catch (error) {
+      await this.removeVideoFiles(id);
+      throw error;
+    }
+  }
+
+  private async removeVideoFiles(id: string): Promise<void> {
+    const finalPath = mediaPath(this.mediaDir, id);
+    await Promise.allSettled([
+      fs.rm(`${finalPath}.upload`, { force: true }),
+      fs.rm(`${finalPath}.converted.mp4`, { force: true }),
+      fs.rm(finalPath, { force: true }),
+    ]);
+  }
+
+  private async finalizeUpload(
+    ownerId: string,
+    name: string,
+    id: string,
+    size: number,
+    usedBytes: number,
+  ): Promise<LiveVideo> {
+    const finalPath = mediaPath(this.mediaDir, id);
+    const temporaryPath = `${finalPath}.upload`;
+    const convertedPath = `${finalPath}.converted.mp4`;
+    try {
       if (size < 12) throw new LiveError(400, 'Invalid MP4 file.');
       const fd = await fs.open(temporaryPath, 'r');
       let signature: Buffer;
@@ -432,7 +492,7 @@ export class LiveService {
           !converted?.isFile() ||
           converted.size < 12 ||
           converted.size > MAX_VIDEO_BYTES ||
-          usage.bytes + converted.size > MAX_OWNER_VIDEO_BYTES
+          usedBytes + converted.size > MAX_OWNER_VIDEO_BYTES
         ) {
           throw new LiveError(413, 'Converted video exceeds the storage limit.');
         }
@@ -459,6 +519,190 @@ export class LiveService {
       ]);
       throw error;
     }
+  }
+
+  private uploadsDir(): string {
+    return resolve(this.mediaDir, 'uploads');
+  }
+
+  private async readUpload(ownerId: string, uploadId: string): Promise<ChunkedUpload> {
+    if (!isUuid(uploadId)) throw new LiveError(400, 'Invalid upload ID.');
+    let upload = this.chunkedUploads.get(uploadId);
+    if (!upload) {
+      try {
+        const raw = await fs.readFile(resolve(this.uploadsDir(), `${uploadId}.json`), 'utf8');
+        const saved = JSON.parse(raw) as Omit<ChunkedUpload, 'received' | 'saving'> & {
+          received: number[];
+        };
+        upload = {
+          ...saved,
+          received: new Set(saved.received),
+          saving: Promise.resolve(),
+          completing: false,
+        };
+        this.chunkedUploads.set(uploadId, upload);
+      } catch {
+        throw new LiveError(404, 'Upload not found.');
+      }
+    }
+    if (upload.ownerId !== ownerId) throw new LiveError(404, 'Upload not found.');
+    return upload;
+  }
+
+  private persistUpload(upload: ChunkedUpload): Promise<void> {
+    upload.saving = upload.saving
+      .catch(() => undefined)
+      .then(() =>
+        fs.writeFile(
+          resolve(this.uploadsDir(), `${upload.id}.json`),
+          JSON.stringify({ ...upload, received: [...upload.received], saving: undefined }),
+        ),
+      );
+    return upload.saving;
+  }
+
+  private async dropUpload(id: string): Promise<void> {
+    this.chunkedUploads.delete(id);
+    await Promise.allSettled([
+      fs.rm(resolve(this.uploadsDir(), `${id}.part`), { force: true }),
+      fs.rm(resolve(this.uploadsDir(), `${id}.json`), { force: true }),
+    ]);
+  }
+
+  private async removeStaleUploads(): Promise<void> {
+    const entries = await fs.readdir(this.uploadsDir()).catch(() => [] as string[]);
+    const cutoff = Date.now() - UPLOAD_MAX_AGE_MS;
+    await Promise.allSettled(
+      entries.map(async (entry) => {
+        const path = resolve(this.uploadsDir(), entry);
+        const stat = await fs.stat(path);
+        if (stat.mtimeMs >= cutoff) return;
+        const id = entry.split('.')[0] ?? '';
+        if (isUuid(id)) this.chunkedUploads.delete(id);
+        await fs.rm(path, { force: true });
+      }),
+    );
+  }
+
+  async createUpload(ownerId: string, name: unknown, size: unknown): Promise<ChunkedUploadInfo> {
+    if (typeof name !== 'string' || !validVideoName(name)) {
+      throw new LiveError(400, 'Select an MP4 file with a valid name.');
+    }
+    if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 12) {
+      throw new LiveError(400, 'Invalid MP4 file.');
+    }
+    const usage = await this.store.videoUsage(ownerId);
+    if (
+      size > MAX_VIDEO_BYTES ||
+      usage.count >= MAX_OWNER_VIDEOS ||
+      usage.bytes + size > MAX_OWNER_VIDEO_BYTES
+    ) {
+      throw new LiveError(413, 'Video storage limit reached.');
+    }
+    await fs.mkdir(this.uploadsDir(), { recursive: true });
+    await this.removeStaleUploads();
+    const active = [...this.chunkedUploads.values()].filter((item) => item.ownerId === ownerId);
+    if (active.length >= MAX_ACTIVE_UPLOADS) {
+      throw new LiveError(429, 'Too many unfinished uploads. Cancel one first.');
+    }
+    const id = randomUUID();
+    const upload: ChunkedUpload = {
+      id,
+      ownerId,
+      name,
+      size,
+      chunkSize: UPLOAD_CHUNK_BYTES,
+      total: Math.ceil(size / UPLOAD_CHUNK_BYTES),
+      received: new Set(),
+      saving: Promise.resolve(),
+    };
+    const part = await fs.open(resolve(this.uploadsDir(), `${id}.part`), 'wx');
+    try {
+      await part.truncate(size);
+    } finally {
+      await part.close();
+    }
+    this.chunkedUploads.set(id, upload);
+    await this.persistUpload(upload);
+    return uploadInfo(upload);
+  }
+
+  async uploadStatus(ownerId: string, uploadId: string): Promise<ChunkedUploadInfo> {
+    return uploadInfo(await this.readUpload(ownerId, uploadId));
+  }
+
+  async writeUploadChunk(
+    ownerId: string,
+    uploadId: string,
+    index: number,
+    input: Readable,
+  ): Promise<void> {
+    const upload = await this.readUpload(ownerId, uploadId);
+    if (upload.completing) throw new LiveError(409, 'Upload is already being finalized.');
+    if (!Number.isInteger(index) || index < 0 || index >= upload.total) {
+      throw new LiveError(400, 'Invalid chunk index.');
+    }
+    const expected =
+      index === upload.total - 1
+        ? upload.size - upload.chunkSize * (upload.total - 1)
+        : upload.chunkSize;
+    let received = 0;
+    const limiter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        received += chunk.length;
+        if (received > expected) callback(new LiveError(400, 'Chunk is larger than expected.'));
+        else callback(null, chunk);
+      },
+    });
+    await pipeline(
+      input,
+      limiter,
+      createWriteStream(resolve(this.uploadsDir(), `${upload.id}.part`), {
+        flags: 'r+',
+        start: index * upload.chunkSize,
+      }),
+    );
+    if (received !== expected) throw new LiveError(400, 'Chunk is smaller than expected.');
+    upload.received.add(index);
+    await this.persistUpload(upload);
+  }
+
+  async completeUpload(ownerId: string, uploadId: string): Promise<LiveVideo> {
+    const upload = await this.readUpload(ownerId, uploadId);
+    if (upload.completing) throw new LiveError(409, 'Upload is already being finalized.');
+    if (upload.received.size !== upload.total) {
+      throw new LiveError(409, 'Some chunks are missing.');
+    }
+    const usage = await this.store.videoUsage(ownerId);
+    if (usage.count >= MAX_OWNER_VIDEOS || usage.bytes + upload.size > MAX_OWNER_VIDEO_BYTES) {
+      throw new LiveError(413, 'Video storage limit reached.');
+    }
+    upload.completing = true;
+    try {
+      await fs.mkdir(this.mediaDir, { recursive: true });
+      const id = upload.id;
+      await fs.rename(
+        resolve(this.uploadsDir(), `${id}.part`),
+        `${mediaPath(this.mediaDir, id)}.upload`,
+      );
+      try {
+        const item = await this.finalizeUpload(ownerId, upload.name, id, upload.size, usage.bytes);
+        await this.dropUpload(id);
+        return item;
+      } catch (error) {
+        await this.removeVideoFiles(id);
+        await this.dropUpload(id);
+        throw error;
+      }
+    } finally {
+      upload.completing = false;
+    }
+  }
+
+  async cancelUpload(ownerId: string, uploadId: string): Promise<void> {
+    const upload = await this.readUpload(ownerId, uploadId);
+    if (upload.completing) throw new LiveError(409, 'Upload is already being finalized.');
+    await this.dropUpload(upload.id);
   }
 
   async listSessions(ownerId: string): Promise<LiveSession[]> {

@@ -728,3 +728,48 @@ test('a room is sent a finish request if saving its destination fails', async ()
     },
   );
 });
+
+test('chunked uploads accept out-of-order chunks, resume from disk, and finalize like a normal upload', async () => {
+  await withFixture(async ({ service }) => {
+    const total = 40 * 1024 * 1024;
+    const data = Buffer.alloc(total, 7);
+    mp4.copy(data, 0);
+    const created = await service.createUpload(owner, 'big.mp4', total);
+    assert.equal(created.total, 2);
+    assert.deepEqual(created.received, []);
+    const second = data.subarray(created.chunkSize);
+    const first = data.subarray(0, created.chunkSize);
+    await service.writeUploadChunk(owner, created.uploadId, 1, Readable.from(second));
+    await assert.rejects(
+      service.writeUploadChunk(owner, created.uploadId, 0, Readable.from(first.subarray(10))),
+      (error: unknown) => error instanceof LiveError && error.statusCode === 400,
+    );
+    await assert.rejects(
+      service.uploadStatus('other-owner', created.uploadId),
+      (error: unknown) => error instanceof LiveError && error.statusCode === 404,
+    );
+    await assert.rejects(
+      service.completeUpload(owner, created.uploadId),
+      (error: unknown) => error instanceof LiveError && error.statusCode === 409,
+    );
+    (service as unknown as { chunkedUploads: Map<string, unknown> }).chunkedUploads.clear();
+    assert.deepEqual((await service.uploadStatus(owner, created.uploadId)).received, [1]);
+    await service.writeUploadChunk(owner, created.uploadId, 0, Readable.from(first));
+    const item = await service.completeUpload(owner, created.uploadId);
+    assert.equal(item.name, 'big.mp4');
+    assert.equal(item.sizeBytes, total);
+    assert.deepEqual(await service.listVideos(owner), [item]);
+    await assert.rejects(
+      service.uploadStatus(owner, created.uploadId),
+      (error: unknown) => error instanceof LiveError && error.statusCode === 404,
+    );
+    await assert.rejects(
+      service.createUpload(owner, '../x.mp4', total),
+      (error: unknown) => error instanceof LiveError && error.statusCode === 400,
+    );
+    await assert.rejects(
+      service.createUpload(owner, 'huge.mp4', 9 * 1024 * 1024 * 1024),
+      (error: unknown) => error instanceof LiveError && error.statusCode === 413,
+    );
+  });
+});

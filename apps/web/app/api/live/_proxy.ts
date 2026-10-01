@@ -92,6 +92,19 @@ function safeResult(path: string, result: unknown) {
       },
     };
   }
+  if (path.includes('/live/uploads')) {
+    if (data.item) return { item: safeVideo(data.item) };
+    if (data.ok === true) return { ok: true };
+    if (typeof data.uploadId === 'string' && Array.isArray(data.received)) {
+      return {
+        uploadId: data.uploadId,
+        size: typeof data.size === 'number' ? data.size : 0,
+        chunkSize: typeof data.chunkSize === 'number' ? data.chunkSize : 0,
+        total: typeof data.total === 'number' ? data.total : 0,
+        received: data.received.filter((value): value is number => Number.isInteger(value)),
+      };
+    }
+  }
   if (path.includes('/live/videos')) {
     if (Array.isArray(data.items)) return { items: data.items.map(safeVideo) };
     if (data.item) return { item: safeVideo(data.item) };
