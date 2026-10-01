@@ -988,3 +988,31 @@ test('profile picture is served through the API and refreshed when the stored li
     await app.close();
   }
 });
+
+test('identity lookup falls back to the public profile when account info has no picture', async () => {
+  const realFetch = globalThis.fetch;
+  const requested: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    requested.push(url);
+    if (url.includes('/passport/web/account/info/')) {
+      return Response.json(
+        { data: { user_id_str: '1234567890123456', username: 'sample.user', avatar_url: '' } },
+        { headers: { 'content-type': 'application/json' } },
+      );
+    }
+    if (new Headers(init?.headers).get('cookie') === null) {
+      return new Response('{"statusCode":209002}');
+    }
+    return new Response(
+      'x{"avatarLarger":"https:\\u002F\\u002Fp19-common-sign.tiktokcdn.com\\u002Fpic~c5.jpeg?x=1"}y',
+    );
+  }) as typeof fetch;
+  try {
+    const identity = await lookupTikTokIdentity('sessionid=abc');
+    assert.equal(identity?.avatarUrl, 'https://p19-common-sign.tiktokcdn.com/pic~c5.jpeg?x=1');
+    assert.ok(requested.some((url) => url === 'https://www.tiktok.com/@sample.user'));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

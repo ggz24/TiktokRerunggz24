@@ -248,5 +248,37 @@ export async function lookupTikTokIdentity(
       // A missing or malformed avatar does not invalidate the account identity.
     }
   }
+  // The account-info response often leaves avatar_url empty; the public profile has the picture.
+  avatarUrl ??= await publicProfileAvatar(username, userAgent ?? fallbackUserAgent);
+  // Some profiles only show their picture to a logged-in viewer; use the account's own session.
+  avatarUrl ??= await publicProfileAvatar(username, userAgent ?? fallbackUserAgent, cookieHeader);
   return { userId: String(userId), username, ...(avatarUrl ? { avatarUrl } : {}) };
+}
+
+async function publicProfileAvatar(
+  username: string,
+  userAgent: string,
+  cookieHeader?: string,
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(`https://www.tiktok.com/@${encodeURIComponent(username)}`, {
+      headers: {
+        'user-agent': userAgent,
+        'accept-language': 'en-US,en;q=0.9',
+        ...(cookieHeader ? { cookie: cookieHeader } : {}),
+      },
+      redirect: 'error',
+      signal: AbortSignal.timeout(8_000),
+      cache: 'no-store',
+    });
+    if (!response.ok) return undefined;
+    const html = await response.text();
+    const match =
+      /"avatarLarger":"([^"]{1,2048})"/.exec(html) ?? /"avatarMedium":"([^"]{1,2048})"/.exec(html);
+    if (!match) return undefined;
+    const parsed = new URL(JSON.parse(`"${match[1]}"`) as string);
+    return parsed.protocol === 'https:' ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
