@@ -31,6 +31,7 @@ const {
   mockLiveSessionId,
   parseAccountImportCurl,
   parseLiveProductAddCurl,
+  parseLiveProductDeleteCurl,
 } = require('@live-hub/tiktok-client') as typeof import('@live-hub/tiktok-client');
 const mockClient = createTikTokClient(createMockTransport());
 
@@ -226,7 +227,9 @@ export function createApp(
   function productSetBody(body: unknown, previous?: ProductSetInput): ProductSetInput | null {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
     const values = body as Record<string, unknown>;
-    if (Object.keys(values).some((key) => !['name', 'curl', 'accountId'].includes(key)))
+    if (
+      Object.keys(values).some((key) => !['name', 'curl', 'accountId', 'deleteCurl'].includes(key))
+    )
       return null;
     if (!validAlias(values.name)) return null;
     if (
@@ -240,13 +243,36 @@ export function createApp(
       values.accountId === undefined ? (previous?.accountId ?? null) : values.accountId;
     if (accountId !== null && (typeof accountId !== 'string' || !validAccountId(accountId)))
       return null;
+    let deleteCurl: string | null | undefined;
+    if (values.deleteCurl !== undefined) {
+      if (values.deleteCurl === null || values.deleteCurl === '') deleteCurl = null;
+      else if (typeof values.deleteCurl === 'string' && values.deleteCurl.length <= 100_000)
+        deleteCurl = values.deleteCurl;
+      else return null;
+    }
     try {
       const parsed = parseLiveProductAddCurl(curl);
       if (!parsed.cookieHeader && !accountId) return null;
+      const removalSource =
+        deleteCurl === undefined
+          ? ((previous as { deleteCurl?: string | null } | undefined)?.deleteCurl ?? null)
+          : deleteCurl;
+      if (removalSource) {
+        // The remove request is signed for exactly these products, so it must match the set.
+        const removal = parseLiveProductDeleteCurl(removalSource);
+        const ids = new Set(parsed.productIds);
+        if (
+          removal.productIds.length !== ids.size ||
+          removal.productIds.some((productId: string) => !ids.has(productId)) ||
+          (!removal.cookieHeader && !accountId)
+        )
+          return null;
+      }
       return {
         name: values.name.trim(),
         accountId,
         curl,
+        ...(deleteCurl !== undefined ? { deleteCurl } : {}),
         roomId: parsed.roomId,
         productIds: parsed.productIds,
         hasCookie: Boolean(parsed.cookieHeader),
@@ -382,6 +408,43 @@ export function createApp(
       }
       const outcome = await productAddSender(parsed, cookieHeader);
       const result = { outcome, roomId: parsed.roomId, productCount: parsed.productIds.length };
+      if (outcome === 'rejected') return reply.status(422).send(result);
+      if (outcome === 'unverified') return reply.status(202).send(result);
+      return result;
+    } catch {
+      return reply.status(503).send({ error: 'Product set request is unavailable.' });
+    }
+  });
+
+  app.post('/api/v1/live/product-sets/:id/remove', async (request, reply) => {
+    if (!productSetStore || !accountConfig)
+      return reply.status(503).send({ error: 'Product sets are unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { id } = request.params as { id: string };
+    if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid product set ID.' });
+    try {
+      const saved = await productSetStore.find(ownerId, id);
+      if (!saved) return reply.status(404).send({ error: 'Product set not found.' });
+      if (!saved.deleteCurl) {
+        return reply.status(409).send({ error: 'This set has no remove request saved.' });
+      }
+      const parsed = parseLiveProductDeleteCurl(saved.deleteCurl);
+      let cookieHeader = parsed.cookieHeader;
+      if (!cookieHeader) {
+        if (!saved.accountId)
+          return reply.status(400).send({ error: 'Select a connected account.' });
+        const account = await accountConfig.store.findEncrypted(ownerId, saved.accountId);
+        if (!account) return reply.status(404).send({ error: 'Account not found.' });
+        cookieHeader = decryptAccountCookie(
+          account,
+          accountConfig.encryptionKey,
+          ownerId,
+          saved.accountId,
+        );
+      }
+      const outcome = await productAddSender(parsed, cookieHeader);
+      const result = { outcome, productCount: parsed.productIds.length };
       if (outcome === 'rejected') return reply.status(422).send(result);
       if (outcome === 'unverified') return reply.status(202).send(result);
       return result;

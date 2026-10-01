@@ -14,6 +14,7 @@ type ProductSet = Preview & {
   id: string;
   name: string;
   accountId: string | null;
+  hasDelete?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -35,6 +36,7 @@ export default function ProductCurlPanel() {
   const [name, setName] = useState('');
   const [accountId, setAccountId] = useState('');
   const [curl, setCurl] = useState('');
+  const [deleteCurl, setDeleteCurl] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -89,6 +91,7 @@ export default function ProductCurlPanel() {
     setName('');
     setAccountId('');
     setCurl('');
+    setDeleteCurl('');
     setPreview(null);
   }
 
@@ -97,6 +100,7 @@ export default function ProductCurlPanel() {
     setName(item.name);
     setAccountId(item.accountId ?? '');
     setCurl('');
+    setDeleteCurl('');
     setPreview({ roomId: item.roomId, productIds: item.productIds, hasCookie: item.hasCookie });
     setError('');
     setNotice('แก้ชื่อได้ทันที หาก cURL หมดอายุ ให้วาง cURL ใหม่แล้วตรวจรายการก่อนบันทึก');
@@ -163,6 +167,7 @@ export default function ProductCurlPanel() {
             name: name.trim(),
             accountId: accountId || null,
             ...(curl.trim() ? { curl } : {}),
+            ...(deleteCurl.trim() ? { deleteCurl } : {}),
           }),
         },
       );
@@ -244,6 +249,35 @@ export default function ProductCurlPanel() {
     }
   }
 
+  async function removeFromLive(item: ProductSet) {
+    if (
+      busy ||
+      !window.confirm(
+        `ลบสินค้า ${item.productIds.length} รายการของชุด “${item.name}” ออกจากตะกร้า LIVE จริงหรือไม่?`,
+      )
+    )
+      return;
+    setBusy(item.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await fetch(apiPath(`/api/live/product-sets/${item.id}/remove`), {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const result = (await response.json()) as { outcome: string };
+      setNotice(
+        result.outcome === 'accepted'
+          ? `TikTok Shop ตอบรับการลบชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
+          : `ส่งคำขอลบชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'ลบสินค้าออกจาก LIVE ไม่สำเร็จ');
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function deleteSet(item: ProductSet) {
     if (busy || !window.confirm(`ลบชุดสินค้า “${item.name}” หรือไม่?`)) return;
     setBusy(item.id);
@@ -293,6 +327,16 @@ export default function ProductCurlPanel() {
                 >
                   {busy === item.id ? 'กำลังดำเนินการ…' : '⚡ ส่งเข้า LIVE'}
                 </button>
+                {item.hasDelete && (
+                  <button
+                    type="button"
+                    className="cyber-btn danger"
+                    disabled={busy !== ''}
+                    onClick={() => void removeFromLive(item)}
+                  >
+                    ลบออกจาก LIVE
+                  </button>
+                )}
                 <button
                   type="button"
                   className="cyber-btn secondary"
@@ -368,6 +412,25 @@ export default function ProductCurlPanel() {
           <p>
             cURL ที่บันทึกเข้ารหัสไว้และไม่แสดงกลับบนหน้าเว็บ เมื่อ token หมดอายุ ให้กดแก้ไขแล้ววาง
             cURL ใหม่
+          </p>
+          <label className="cyber-field">
+            cURL ลบสินค้า (ไม่บังคับ) จาก <code>live_product/delete</code>
+            <textarea
+              className="cyber-textarea"
+              rows={5}
+              value={deleteCurl}
+              disabled={busy !== ''}
+              onChange={(event) => setDeleteCurl(event.target.value)}
+              placeholder={
+                editingId
+                  ? 'ปล่อยว่างเพื่อใช้คำสั่งลบเดิม หรือวาง cURL ลบใหม่ (ต้องเป็นสินค้าชุดเดียวกับ cURL เพิ่ม)'
+                  : "curl --url 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/delete?...' ..."
+              }
+            />
+          </label>
+          <p>
+            ถ้าบันทึกคำสั่งลบไว้ จะมีปุ่ม “ลบออกจาก LIVE” ที่ชุดนี้ และที่การ์ดบัญชีหน้าแรก
+            คำสั่งลบใช้ลบได้เฉพาะสินค้าชุดเดียวกับที่คัดลอกมา (ลายเซ็นของ TikTok ผูกกับคำขอ)
           </p>
           <div className="cyber-product-set-actions">
             <button

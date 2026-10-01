@@ -81,7 +81,20 @@ function tokenize(input: string): string[] {
   return tokens;
 }
 
-export function parseLiveProductAddCurl(input: string): ParsedLiveProductAddCurl {
+const ADD_PATH = '/api/v1/streamer_desktop/live_product/add';
+const DELETE_PATH = '/api/v1/streamer_desktop/live_product/delete';
+
+interface ParsedShopCurl {
+  url: string;
+  body: string;
+  data: Record<string, unknown>;
+  cookieHeader?: string;
+  userAgent?: string;
+  referer?: string;
+  region?: string;
+}
+
+function parseShopCurl(input: string, pathname: string): ParsedShopCurl {
   const tokens = tokenize(input);
   if (!/^(curl|curl\.exe)$/i.test(tokens[0] ?? '')) invalid();
   let urlText: string | undefined;
@@ -146,7 +159,7 @@ export function parseLiveProductAddCurl(input: string): ParsedLiveProductAddCurl
     url.username ||
     url.password ||
     url.hash ||
-    url.pathname !== '/api/v1/streamer_desktop/live_product/add'
+    url.pathname !== pathname
   )
     invalid();
   if (!headers.get('content-type')?.toLowerCase().startsWith('application/json')) invalid();
@@ -171,22 +184,6 @@ export function parseLiveProductAddCurl(input: string): ParsedLiveProductAddCurl
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) invalid();
   const data = parsed as Record<string, unknown>;
-  // Streamer Desktop sends an empty room_id while preparing a LIVE that has not started.
-  if (typeof data.room_id !== 'string' || (data.room_id !== '' && !/^\d{8,24}$/.test(data.room_id)))
-    invalid();
-  if (
-    !Array.isArray(data.product_info) ||
-    data.product_info.length < 1 ||
-    data.product_info.length > 50
-  )
-    invalid();
-  const productIds = data.product_info.map((item: unknown) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) invalid();
-    const id = (item as Record<string, unknown>).product_id;
-    if (typeof id !== 'string' || !/^\d{8,24}$/.test(id)) invalid();
-    return id;
-  });
-  if (new Set(productIds).size !== productIds.length) invalid();
   const userAgent = headers.get('user-agent');
   const region = headers.get('x-tt-store-region');
   if (userAgent && (userAgent.length > 500 || /[^\x20-\x7e]/.test(userAgent))) invalid();
@@ -194,11 +191,52 @@ export function parseLiveProductAddCurl(input: string): ParsedLiveProductAddCurl
   return {
     url: url.href,
     body,
-    roomId: data.room_id,
-    productIds,
+    data,
     ...(cookie ? { cookieHeader: cookie } : {}),
     ...(userAgent ? { userAgent } : {}),
     ...(referer ? { referer } : {}),
     ...(region ? { region } : {}),
   };
+}
+
+function productId(value: unknown): string {
+  if (typeof value !== 'string' || !/^\d{8,24}$/.test(value)) invalid();
+  return value;
+}
+
+function uniqueIds(ids: string[]): string[] {
+  if (ids.length < 1 || ids.length > 50 || new Set(ids).size !== ids.length) invalid();
+  return ids;
+}
+
+export function parseLiveProductAddCurl(input: string): ParsedLiveProductAddCurl {
+  const { data, ...request } = parseShopCurl(input, ADD_PATH);
+  // Streamer Desktop sends an empty room_id while preparing a LIVE that has not started.
+  if (typeof data.room_id !== 'string' || (data.room_id !== '' && !/^\d{8,24}$/.test(data.room_id)))
+    invalid();
+  if (!Array.isArray(data.product_info)) invalid();
+  const productIds = uniqueIds(
+    data.product_info.map((item: unknown) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) invalid();
+      return productId((item as Record<string, unknown>).product_id);
+    }),
+  );
+  return { ...request, roomId: data.room_id, productIds };
+}
+
+/** A copied "remove products from the LIVE cart" request; replayed unchanged because it is signed. */
+export interface ParsedLiveProductDeleteCurl {
+  url: string;
+  body: string;
+  productIds: string[];
+  cookieHeader?: string;
+  userAgent?: string;
+  referer?: string;
+  region?: string;
+}
+
+export function parseLiveProductDeleteCurl(input: string): ParsedLiveProductDeleteCurl {
+  const { data, ...request } = parseShopCurl(input, DELETE_PATH);
+  if (!Array.isArray(data.product_ids)) invalid();
+  return { ...request, productIds: uniqueIds(data.product_ids.map(productId)) };
 }

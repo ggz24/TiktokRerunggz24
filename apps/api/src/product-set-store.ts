@@ -8,6 +8,7 @@ export interface ProductSetItem {
   roomId: string;
   productIds: string[];
   hasCookie: boolean;
+  hasDelete: boolean;
   autoApply: boolean;
   createdAt: string;
   updatedAt: string;
@@ -20,11 +21,16 @@ export interface ProductSetInput {
   productIds: string[];
   hasCookie: boolean;
   curl: string;
+  /** undefined keeps the saved remove request, null clears it. */
+  deleteCurl?: string | null;
 }
 
 export interface ProductSetStore {
   list(ownerId: string): Promise<ProductSetItem[]>;
-  find(ownerId: string, id: string): Promise<(ProductSetItem & { curl: string }) | null>;
+  find(
+    ownerId: string,
+    id: string,
+  ): Promise<(ProductSetItem & { curl: string; deleteCurl: string | null }) | null>;
   create(ownerId: string, input: ProductSetInput): Promise<ProductSetItem>;
   update(ownerId: string, id: string, input: ProductSetInput): Promise<ProductSetItem | null>;
   delete(ownerId: string, id: string): Promise<boolean>;
@@ -32,6 +38,10 @@ export interface ProductSetStore {
 }
 
 type Row = {
+  has_delete?: boolean;
+  delete_curl_ciphertext: Buffer | null;
+  delete_curl_iv: Buffer | null;
+  delete_curl_tag: Buffer | null;
   id: string;
   owner_id: string;
   name: string;
@@ -48,7 +58,7 @@ type Row = {
 };
 
 const publicColumns =
-  'id, name, account_id, room_id, product_ids, has_cookie, auto_apply, created_at, updated_at';
+  'id, name, account_id, room_id, product_ids, has_cookie, auto_apply, created_at, updated_at, (delete_curl_ciphertext IS NOT NULL) AS has_delete';
 
 function item(row: Row): ProductSetItem {
   return {
@@ -58,16 +68,17 @@ function item(row: Row): ProductSetItem {
     roomId: row.room_id,
     productIds: row.product_ids,
     hasCookie: row.has_cookie,
+    hasDelete: row.has_delete ?? row.delete_curl_ciphertext != null,
     autoApply: row.auto_apply,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
 }
 
-function encrypt(curl: string, key: Buffer, ownerId: string, id: string) {
+function encrypt(curl: string, key: Buffer, ownerId: string, id: string, purpose = 'product-set') {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
-  cipher.setAAD(Buffer.from(`${ownerId}\0${id}\0product-set`, 'utf8'));
+  cipher.setAAD(Buffer.from(`${ownerId}\0${id}\0${purpose}`, 'utf8'));
   const plaintext = Buffer.from(curl, 'utf8');
   try {
     return {
@@ -80,11 +91,20 @@ function encrypt(curl: string, key: Buffer, ownerId: string, id: string) {
   }
 }
 
-function decrypt(row: Row, key: Buffer): string {
-  const decipher = createDecipheriv('aes-256-gcm', key, row.curl_iv);
-  decipher.setAAD(Buffer.from(`${row.owner_id}\0${row.id}\0product-set`, 'utf8'));
-  decipher.setAuthTag(row.curl_tag);
-  const plaintext = Buffer.concat([decipher.update(row.curl_ciphertext), decipher.final()]);
+function decrypt(row: Row, key: Buffer, remove = false): string {
+  const iv = remove ? row.delete_curl_iv : row.curl_iv;
+  const tag = remove ? row.delete_curl_tag : row.curl_tag;
+  const ciphertext = remove ? row.delete_curl_ciphertext : row.curl_ciphertext;
+  if (!iv || !tag || !ciphertext) throw new Error('Saved request is missing.');
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAAD(
+    Buffer.from(
+      `${row.owner_id}\0${row.id}\0${remove ? 'product-set-delete' : 'product-set'}`,
+      'utf8',
+    ),
+  );
+  decipher.setAuthTag(tag);
+  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   try {
     return plaintext.toString('utf8');
   } finally {
@@ -114,6 +134,12 @@ export async function ensureProductSetTable(pool: Pool): Promise<void> {
     'ALTER TABLE livehub_product_sets ADD COLUMN IF NOT EXISTS auto_apply BOOLEAN NOT NULL DEFAULT FALSE',
   );
   await pool.query(`
+    ALTER TABLE livehub_product_sets
+      ADD COLUMN IF NOT EXISTS delete_curl_ciphertext BYTEA,
+      ADD COLUMN IF NOT EXISTS delete_curl_iv BYTEA,
+      ADD COLUMN IF NOT EXISTS delete_curl_tag BYTEA
+  `);
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS livehub_product_sets_owner_updated_idx
     ON livehub_product_sets (owner_id, updated_at DESC)
   `);
@@ -136,16 +162,26 @@ export function createPgProductSetStore(pool: Pool, key: Buffer): ProductSetStor
         [ownerId, id],
       );
       const row = result.rows[0];
-      return row ? { ...item(row), curl: decrypt(row, key) } : null;
+      return row
+        ? {
+            ...item(row),
+            curl: decrypt(row, key),
+            deleteCurl: row.delete_curl_ciphertext ? decrypt(row, key, true) : null,
+          }
+        : null;
     },
     async create(ownerId, input) {
       const id = randomUUID();
       const secret = encrypt(input.curl, key, ownerId, id);
+      const removal = input.deleteCurl
+        ? encrypt(input.deleteCurl, key, ownerId, id, 'product-set-delete')
+        : null;
       const result = await pool.query<Row>(
         `INSERT INTO livehub_product_sets
          (id, owner_id, name, account_id, room_id, product_ids, has_cookie,
-          curl_ciphertext, curl_iv, curl_tag)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)
+          curl_ciphertext, curl_iv, curl_tag,
+          delete_curl_ciphertext, delete_curl_iv, delete_curl_tag)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13)
          RETURNING ${publicColumns}`,
         [
           id,
@@ -158,16 +194,25 @@ export function createPgProductSetStore(pool: Pool, key: Buffer): ProductSetStor
           secret.ciphertext,
           secret.iv,
           secret.tag,
+          removal?.ciphertext ?? null,
+          removal?.iv ?? null,
+          removal?.tag ?? null,
         ],
       );
       return item(result.rows[0]);
     },
     async update(ownerId, id, input) {
       const secret = encrypt(input.curl, key, ownerId, id);
+      const removal = input.deleteCurl
+        ? encrypt(input.deleteCurl, key, ownerId, id, 'product-set-delete')
+        : null;
       const result = await pool.query<Row>(
         `UPDATE livehub_product_sets SET
            name = $3, account_id = $4, room_id = $5, product_ids = $6::jsonb,
            has_cookie = $7, curl_ciphertext = $8, curl_iv = $9, curl_tag = $10,
+           delete_curl_ciphertext = CASE WHEN $11::boolean THEN $12::bytea ELSE delete_curl_ciphertext END,
+           delete_curl_iv = CASE WHEN $11::boolean THEN $13::bytea ELSE delete_curl_iv END,
+           delete_curl_tag = CASE WHEN $11::boolean THEN $14::bytea ELSE delete_curl_tag END,
            auto_apply = CASE WHEN account_id IS DISTINCT FROM $4 THEN FALSE ELSE auto_apply END,
            updated_at = NOW()
          WHERE owner_id = $1 AND id = $2
@@ -183,6 +228,10 @@ export function createPgProductSetStore(pool: Pool, key: Buffer): ProductSetStor
           secret.ciphertext,
           secret.iv,
           secret.tag,
+          input.deleteCurl !== undefined,
+          removal?.ciphertext ?? null,
+          removal?.iv ?? null,
+          removal?.tag ?? null,
         ],
       );
       return result.rows[0] ? item(result.rows[0]) : null;

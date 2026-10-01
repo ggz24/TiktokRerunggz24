@@ -249,7 +249,9 @@ test('product add uses the selected encrypted account session only after an expl
 
 test('named product sets stay owner-scoped and only send after the explicit action', async () => {
   const fixture = accountFixture(async () => null);
-  const records: Array<ProductSetItem & { ownerId: string; curl: string }> = [];
+  const records: Array<
+    ProductSetItem & { ownerId: string; curl: string; deleteCurl: string | null }
+  > = [];
   const setId = '11111111-1111-4111-8111-111111111111';
   const now = '2026-09-29T00:00:00.000Z';
   const publicItem = (row: ProductSetItem): ProductSetItem => ({
@@ -259,6 +261,7 @@ test('named product sets stay owner-scoped and only send after the explicit acti
     roomId: row.roomId,
     productIds: row.productIds,
     hasCookie: row.hasCookie,
+    hasDelete: row.hasDelete,
     autoApply: row.autoApply,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -272,6 +275,8 @@ test('named product sets stay owner-scoped and only send after the explicit acti
         id: setId,
         ownerId,
         ...input,
+        hasDelete: Boolean(input.deleteCurl),
+        deleteCurl: input.deleteCurl ?? null,
         autoApply: false,
         createdAt: now,
         updatedAt: now,
@@ -282,7 +287,13 @@ test('named product sets stay owner-scoped and only send after the explicit acti
     update: async (ownerId, id, input) => {
       const item = records.find((row) => row.ownerId === ownerId && row.id === id);
       if (!item) return null;
-      Object.assign(item, input);
+      Object.assign(
+        item,
+        input,
+        input.deleteCurl !== undefined
+          ? { hasDelete: Boolean(input.deleteCurl), deleteCurl: input.deleteCurl }
+          : {},
+      );
       return publicItem(item);
     },
     delete: async (ownerId, id) => {
@@ -368,6 +379,37 @@ test('named product sets stay owner-scoped and only send after the explicit acti
   assert.equal(sent.statusCode, 200);
   assert.equal(sent.json().outcome, 'accepted');
   assert.equal(sends, 1);
+  const removeUrl = `/api/v1/live/product-sets/${setId}/remove`;
+  assert.equal((await app.inject({ method: 'POST', url: removeUrl, headers })).statusCode, 409);
+  const deleteCurl = (ids: string[]) =>
+    "curl --url 'https://shop.tiktok.com/api/v1/streamer_desktop/live_product/delete?msToken=test' " +
+    "-H 'Content-Type: application/json' -b 'sessionid=product-test' --data-raw '" +
+    JSON.stringify({ product_ids: ids, promotion_ids: [], product_to_parent_id: {} }) +
+    "'";
+  const mismatched = await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/live/product-sets/${setId}`,
+    headers,
+    payload: { name: 'ชุดสินค้าใหม่', deleteCurl: deleteCurl(['1732490821698225999']) },
+  });
+  assert.equal(mismatched.statusCode, 400);
+  const withRemoval = await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/live/product-sets/${setId}`,
+    headers,
+    payload: { name: 'ชุดสินค้าใหม่', deleteCurl: deleteCurl(['1732490821698225758']) },
+  });
+  assert.equal(withRemoval.statusCode, 200);
+  assert.equal(withRemoval.json().item.hasDelete, true);
+  assert.equal(withRemoval.body.includes('sessionid'), false);
+  assert.equal(
+    (await app.inject({ method: 'POST', url: removeUrl, headers: otherHeaders })).statusCode,
+    404,
+  );
+  const removed = await app.inject({ method: 'POST', url: removeUrl, headers });
+  assert.equal(removed.statusCode, 200);
+  assert.deepEqual(removed.json(), { outcome: 'accepted', productCount: 1 });
+  assert.equal(sends, 2);
   assert.equal(
     (
       await app.inject({
@@ -399,7 +441,7 @@ test('a saved set uses the captured Shop request unchanged when linked to a LIVE
   const setId = '11111111-1111-4111-8111-111111111111';
   const roomId = '7690886057457437492';
   let currentRoomId: string | null = null;
-  const state: { saved?: ProductSetItem & { curl: string } } = {};
+  const state: { saved?: ProductSetItem & { curl: string; deleteCurl: string | null } } = {};
   const store: ProductSetStore = {
     list: async () => (state.saved ? [state.saved] : []),
     find: async (_owner, id) => (id === setId ? (state.saved ?? null) : null),
@@ -454,6 +496,8 @@ test('a saved set uses the captured Shop request unchanged when linked to a LIVE
     roomId: '',
     productIds: ['1732490821698225758'],
     hasCookie: true,
+    hasDelete: false,
+    deleteCurl: null,
     autoApply: false,
     createdAt: '2026-09-29T00:00:00.000Z',
     updatedAt: '2026-09-29T00:00:00.000Z',

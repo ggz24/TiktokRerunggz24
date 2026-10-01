@@ -11,6 +11,7 @@ type ProductSet = {
   productIds: string[];
   roomId: string;
   autoApply: boolean;
+  hasDelete?: boolean;
 };
 
 export default function QuickProductSetPanel({ accountId }: { accountId: string }) {
@@ -101,6 +102,45 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
     }
   }
 
+  async function remove(item: ProductSet) {
+    if (sendingId) return;
+    if (
+      !window.confirm(
+        `ลบสินค้า ${item.productIds.length} รายการของชุด “${item.name}” ออกจากตะกร้า LIVE จริงหรือไม่?`,
+      )
+    )
+      return;
+    setSendingId(item.id);
+    setMessage('');
+    setError('');
+    try {
+      const response = await fetch(apiPath(`/api/live/product-sets/${item.id}/remove`), {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        const result: unknown = await response.json().catch(() => null);
+        throw new Error(
+          result &&
+            typeof result === 'object' &&
+            'error' in result &&
+            typeof result.error === 'string'
+            ? result.error
+            : 'ลบสินค้าออกจาก LIVE ไม่สำเร็จ',
+        );
+      }
+      const result = (await response.json()) as { outcome?: string };
+      setMessage(
+        result.outcome === 'accepted'
+          ? `TikTok Shop ตอบรับการลบชุด “${item.name}” แล้ว ตรวจรายการใน Streamer Desktop`
+          : `ส่งคำขอลบชุด “${item.name}” แล้ว แต่ยืนยันผลไม่ได้ ตรวจรายการใน Streamer Desktop`,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'ลบสินค้าออกจาก LIVE ไม่สำเร็จ');
+    } finally {
+      setSendingId('');
+    }
+  }
+
   return (
     <div className="cyber-quick-product-sets">
       <p>เลือกชุดที่บันทึกไว้ แล้วกดส่งสินค้าเข้า TikTok Shop Streamer Desktop</p>
@@ -126,8 +166,18 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
                 disabled={Boolean(sendingId)}
                 onClick={() => void send(item)}
               >
-                {sendingId === item.id ? 'กำลังส่ง…' : 'ส่งเข้า LIVE'}
+                {sendingId === item.id ? 'กำลังดำเนินการ…' : 'ส่งเข้า LIVE'}
               </button>
+              {item.hasDelete && (
+                <button
+                  type="button"
+                  className="cyber-btn danger"
+                  disabled={Boolean(sendingId)}
+                  onClick={() => void remove(item)}
+                >
+                  ลบออกจาก LIVE
+                </button>
+              )}
             </div>
           ))}
         </div>

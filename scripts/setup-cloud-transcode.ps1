@@ -14,8 +14,14 @@ $agent = "service-$number@gcp-sa-transcoder.iam.gserviceaccount.com"
 
 gcloud services enable transcoder.googleapis.com --project=$project
 
-gcloud storage buckets create "gs://$bucket" --project=$project --location=asia-southeast1 `
-  --uniform-bucket-level-access --public-access-prevention
+$ErrorActionPreference = 'Continue'
+gcloud storage buckets describe "gs://$bucket" --project=$project *> $null
+$exists = $LASTEXITCODE -eq 0
+$ErrorActionPreference = 'Stop'
+if (-not $exists) {
+  gcloud storage buckets create "gs://$bucket" --project=$project --location=asia-southeast1 `
+    --uniform-bucket-level-access --public-access-prevention
+}
 $lifecycle = Join-Path $env:TEMP 'transcode-lifecycle.json'
 '{"rule":[{"action":{"type":"Delete"},"condition":{"age":1}}]}' | Set-Content $lifecycle -Encoding ascii
 gcloud storage buckets update "gs://$bucket" --lifecycle-file=$lifecycle

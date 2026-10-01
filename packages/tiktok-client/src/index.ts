@@ -1,11 +1,15 @@
-export { createTikTokClient } from './client';
+﻿export { createTikTokClient } from './client';
 export { createMockTransport } from './mock-transport';
 export { mockAccountId, mockLiveSessionId } from './fixtures';
 export { parseSanitizedCurl, substituteRequestTemplate } from './request-template';
 export { parseAccountImportCurl } from './account-curl';
 export type { ParsedAccountImportCurl } from './account-curl';
-export { parseLiveProductAddCurl, forLiveProductRoom } from './live-product-curl';
-export type { ParsedLiveProductAddCurl } from './live-product-curl';
+export {
+  parseLiveProductAddCurl,
+  parseLiveProductDeleteCurl,
+  forLiveProductRoom,
+} from './live-product-curl';
+export type { ParsedLiveProductAddCurl, ParsedLiveProductDeleteCurl } from './live-product-curl';
 export { parseProxyConfig } from './proxy';
 export {
   createTikTokLiveRoom,

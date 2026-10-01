@@ -1,8 +1,13 @@
 import type { ParsedLiveProductAddCurl } from '@live-hub/tiktok-client';
 
 export type ProductAddOutcome = 'accepted' | 'rejected' | 'unverified';
+/** The add and remove requests share one replay path; only these fields are used. */
+export type ReplayableShopRequest = Pick<
+  ParsedLiveProductAddCurl,
+  'url' | 'body' | 'userAgent' | 'referer' | 'region'
+>;
 export type ProductAddSender = (
-  request: ParsedLiveProductAddCurl,
+  request: ReplayableShopRequest & { roomId?: string },
   cookieHeader: string,
 ) => Promise<ProductAddOutcome>;
 
