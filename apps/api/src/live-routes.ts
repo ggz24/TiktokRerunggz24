@@ -105,7 +105,7 @@ export function registerLiveRoutes(
     if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
     const { uploadId } = request.params as { uploadId: string };
     try {
-      return reply.status(201).send({ item: await service.completeUpload(ownerId, uploadId) });
+      return reply.status(202).send(await service.completeUpload(ownerId, uploadId));
     } catch (error) {
       return failure(reply, error);
     }

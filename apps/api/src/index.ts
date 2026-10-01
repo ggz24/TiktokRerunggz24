@@ -125,6 +125,7 @@ if (accountConfig) {
       : undefined,
     maxConcurrentLive,
   );
+  void liveService.recoverUploads().catch(() => undefined);
   autoLive = new AutoLiveManager(pool, liveService, accountConfig.store);
 }
 

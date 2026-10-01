@@ -16,6 +16,9 @@ type UploadInfo = {
   chunkSize: number;
   total: number;
   received: number[];
+  state?: 'uploading' | 'processing' | 'failed' | 'done';
+  error?: string;
+  item?: StoredVideo;
 };
 
 type Reply = { status: number; body: unknown };
@@ -91,7 +94,13 @@ async function openUpload(file: File): Promise<UploadInfo> {
   const saved = savedUploadId(file);
   if (saved) {
     const status = await send('GET', `/api/live/uploads/${encodeURIComponent(saved)}`);
-    if (status.status === 200 && isInfo(status.body) && status.body.size === file.size) {
+    if (
+      status.status === 200 &&
+      isInfo(status.body) &&
+      status.body.size === file.size &&
+      status.body.state !== 'failed' &&
+      status.body.state !== 'done'
+    ) {
       return status.body;
     }
     remember(file, null);
@@ -151,8 +160,52 @@ async function sendChunk(
   }
 }
 
+function failureMessage(error: string | undefined): string {
+  if (error?.includes('convert')) {
+    return 'ไฟล์ MP4 นี้แปลงเป็น H.264/AAC ไม่สำเร็จ กรุณาตรวจสอบไฟล์ต้นฉบับ';
+  }
+  if (error?.includes('limit') || error?.includes('exceeds')) {
+    return 'ไฟล์ใหญ่เกิน 8 GB หรือพื้นที่คลัง 40 GB เต็ม';
+  }
+  return 'ตรวจหรือแปลงวิดีโอไม่สำเร็จ กรุณาลองอีกครั้ง';
+}
+
+async function waitForProcessing(file: File, uploadId: string): Promise<StoredVideo> {
+  let misses = 0;
+  for (;;) {
+    await wait(4000);
+    let reply: Reply;
+    try {
+      reply = await send('GET', `/api/live/uploads/${encodeURIComponent(uploadId)}`);
+    } catch {
+      if (++misses > 30) throw new Error('เชื่อมต่อระบบอัปโหลดไม่ได้ กรุณารีเฟรชคลังวิดีโอ');
+      continue;
+    }
+    if (reply.status === 404) {
+      remember(file, null);
+      throw new Error('ระบบรีสตาร์ตระหว่างแปลงไฟล์ กรุณาอัปโหลดใหม่อีกครั้ง');
+    }
+    if (reply.status !== 200 || !isInfo(reply.body)) {
+      if (++misses > 30) throw new Error('เชื่อมต่อระบบอัปโหลดไม่ได้ กรุณารีเฟรชคลังวิดีโอ');
+      continue;
+    }
+    misses = 0;
+    if (reply.body.state === 'done' && reply.body.item) {
+      remember(file, null);
+      return reply.body.item;
+    }
+    if (reply.body.state === 'failed') {
+      remember(file, null);
+      throw new Error(failureMessage(reply.body.error));
+    }
+  }
+}
 async function transfer(file: File, onProgress: (percent: number) => void): Promise<StoredVideo> {
   const info = await openUpload(file);
+  if (info.state === 'processing') {
+    onProgress(100);
+    return waitForProcessing(file, info.uploadId);
+  }
   const confirmed = new Set(info.received);
   const inFlight = new Map<number, number>();
   const length = (index: number) => Math.min(info.chunkSize, file.size - index * info.chunkSize);
@@ -195,14 +248,7 @@ async function transfer(file: File, onProgress: (percent: number) => void): Prom
       'POST',
       `/api/live/uploads/${encodeURIComponent(info.uploadId)}/complete`,
     );
-    if (done.status === 201) {
-      const body = done.body;
-      if (body && typeof body === 'object' && 'item' in body && body.item) {
-        remember(file, null);
-        return body.item as StoredVideo;
-      }
-      throw new Error('อ่านผลการอัปโหลดไม่สำเร็จ กรุณารีเฟรชคลังวิดีโอ');
-    }
+    if (done.status === 202) return waitForProcessing(file, info.uploadId);
     if (done.status === 409) {
       const status = await send('GET', `/api/live/uploads/${encodeURIComponent(info.uploadId)}`);
       if (status.status === 200 && isInfo(status.body)) {

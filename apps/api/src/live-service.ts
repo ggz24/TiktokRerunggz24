@@ -300,6 +300,7 @@ export async function defaultConvertVideo(source: string, destination: string): 
 const UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024;
 const UPLOAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_ACTIVE_UPLOADS = 3;
+const RESULT_KEEP_MS = 60 * 60 * 1000;
 
 type ChunkedUpload = {
   id: string;
@@ -311,6 +312,9 @@ type ChunkedUpload = {
   received: Set<number>;
   saving: Promise<void>;
   completing?: boolean;
+  stage?: 'processing' | 'failed' | 'done';
+  error?: string;
+  item?: LiveVideo;
 };
 
 export type ChunkedUploadInfo = {
@@ -319,6 +323,9 @@ export type ChunkedUploadInfo = {
   chunkSize: number;
   total: number;
   received: number[];
+  state: 'uploading' | 'processing' | 'failed' | 'done';
+  error?: string;
+  item?: LiveVideo;
 };
 
 function uploadInfo(upload: ChunkedUpload): ChunkedUploadInfo {
@@ -328,6 +335,9 @@ function uploadInfo(upload: ChunkedUpload): ChunkedUploadInfo {
     chunkSize: upload.chunkSize,
     total: upload.total,
     received: [...upload.received].sort((a, b) => a - b),
+    state: upload.stage ?? 'uploading',
+    ...(upload.error ? { error: upload.error } : {}),
+    ...(upload.item ? { item: upload.item } : {}),
   };
 }
 
@@ -667,8 +677,9 @@ export class LiveService {
     await this.persistUpload(upload);
   }
 
-  async completeUpload(ownerId: string, uploadId: string): Promise<LiveVideo> {
+  async completeUpload(ownerId: string, uploadId: string): Promise<ChunkedUploadInfo> {
     const upload = await this.readUpload(ownerId, uploadId);
+    if (upload.stage) return uploadInfo(upload);
     if (upload.completing) throw new LiveError(409, 'Upload is already being finalized.');
     if (upload.received.size !== upload.total) {
       throw new LiveError(409, 'Some chunks are missing.');
@@ -680,23 +691,55 @@ export class LiveService {
     upload.completing = true;
     try {
       await fs.mkdir(this.mediaDir, { recursive: true });
-      const id = upload.id;
       await fs.rename(
-        resolve(this.uploadsDir(), `${id}.part`),
-        `${mediaPath(this.mediaDir, id)}.upload`,
+        resolve(this.uploadsDir(), `${upload.id}.part`),
+        `${mediaPath(this.mediaDir, upload.id)}.upload`,
       );
-      try {
-        const item = await this.finalizeUpload(ownerId, upload.name, id, upload.size, usage.bytes);
-        await this.dropUpload(id);
-        return item;
-      } catch (error) {
-        await this.removeVideoFiles(id);
-        await this.dropUpload(id);
-        throw error;
-      }
     } finally {
       upload.completing = false;
     }
+    upload.stage = 'processing';
+    void this.finishUpload(upload, usage.bytes);
+    return uploadInfo(upload);
+  }
+
+  private async finishUpload(upload: ChunkedUpload, usedBytes: number): Promise<void> {
+    try {
+      upload.item = await this.finalizeUpload(
+        upload.ownerId,
+        upload.name,
+        upload.id,
+        upload.size,
+        usedBytes,
+      );
+      upload.stage = 'done';
+    } catch (error) {
+      await this.removeVideoFiles(upload.id);
+      upload.stage = 'failed';
+      upload.error = error instanceof LiveError ? error.message : 'Video processing failed.';
+    }
+    await fs.rm(resolve(this.uploadsDir(), `${upload.id}.json`), { force: true });
+    setTimeout(() => this.chunkedUploads.delete(upload.id), RESULT_KEEP_MS).unref();
+  }
+
+  async recoverUploads(): Promise<void> {
+    // After a restart no conversion can be running: drop half-finished temp files and upload
+    // records whose chunk file is gone, but keep .part files so interrupted uploads can resume.
+    const [media, uploads] = await Promise.all([
+      fs.readdir(this.mediaDir).catch(() => [] as string[]),
+      fs.readdir(this.uploadsDir()).catch(() => [] as string[]),
+    ]);
+    await Promise.allSettled(
+      media
+        .filter((name) => name.endsWith('.mp4.upload') || name.endsWith('.mp4.converted.mp4'))
+        .map((name) => fs.rm(resolve(this.mediaDir, name), { force: true })),
+    );
+    const parts = new Set(uploads.filter((name) => name.endsWith('.part')));
+    await Promise.allSettled(
+      uploads
+        .filter((name) => name.endsWith('.json') && !parts.has(name.replace(/\.json$/, '.part')))
+        .map((name) => fs.rm(resolve(this.uploadsDir(), name), { force: true })),
+    );
   }
 
   async cancelUpload(ownerId: string, uploadId: string): Promise<void> {

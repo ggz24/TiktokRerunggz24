@@ -755,14 +755,18 @@ test('chunked uploads accept out-of-order chunks, resume from disk, and finalize
     (service as unknown as { chunkedUploads: Map<string, unknown> }).chunkedUploads.clear();
     assert.deepEqual((await service.uploadStatus(owner, created.uploadId)).received, [1]);
     await service.writeUploadChunk(owner, created.uploadId, 0, Readable.from(first));
-    const item = await service.completeUpload(owner, created.uploadId);
+    const started = await service.completeUpload(owner, created.uploadId);
+    assert.equal(started.state, 'processing');
+    let finished = await service.uploadStatus(owner, created.uploadId);
+    for (let attempt = 0; attempt < 100 && finished.state === 'processing'; attempt++) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      finished = await service.uploadStatus(owner, created.uploadId);
+    }
+    assert.equal(finished.state, 'done');
+    const item = finished.item!;
     assert.equal(item.name, 'big.mp4');
     assert.equal(item.sizeBytes, total);
     assert.deepEqual(await service.listVideos(owner), [item]);
-    await assert.rejects(
-      service.uploadStatus(owner, created.uploadId),
-      (error: unknown) => error instanceof LiveError && error.statusCode === 404,
-    );
     await assert.rejects(
       service.createUpload(owner, '../x.mp4', total),
       (error: unknown) => error instanceof LiveError && error.statusCode === 400,

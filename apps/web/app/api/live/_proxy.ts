@@ -93,8 +93,9 @@ function safeResult(path: string, result: unknown) {
     };
   }
   if (path.includes('/live/uploads')) {
-    if (data.item) return { item: safeVideo(data.item) };
-    if (data.ok === true) return { ok: true };
+    const state = ['uploading', 'processing', 'failed', 'done'].includes(String(data.state))
+      ? (data.state as string)
+      : undefined;
     if (typeof data.uploadId === 'string' && Array.isArray(data.received)) {
       return {
         uploadId: data.uploadId,
@@ -102,8 +103,13 @@ function safeResult(path: string, result: unknown) {
         chunkSize: typeof data.chunkSize === 'number' ? data.chunkSize : 0,
         total: typeof data.total === 'number' ? data.total : 0,
         received: data.received.filter((value): value is number => Number.isInteger(value)),
+        ...(state ? { state } : {}),
+        ...(typeof data.error === 'string' ? { error: data.error.slice(0, 200) } : {}),
+        ...(data.item ? { item: safeVideo(data.item) } : {}),
       };
     }
+    if (data.ok === true) return { ok: true };
+    if (data.item) return { item: safeVideo(data.item) };
   }
   if (path.includes('/live/videos')) {
     if (Array.isArray(data.items)) return { items: data.items.map(safeVideo) };
