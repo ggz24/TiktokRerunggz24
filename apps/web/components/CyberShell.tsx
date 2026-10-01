@@ -183,6 +183,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
   const [streamSetupNotice, setStreamSetupNotice] = useState('');
   const [startingAccountId, setStartingAccountId] = useState<string | null>(null);
   const [stoppingAccountId, setStoppingAccountId] = useState<string | null>(null);
+  const [brokenAvatars, setBrokenAvatars] = useState<Set<string>>(new Set());
   const [startError, setStartError] = useState<{ accountId: string; message: string } | null>(null);
   const streamLoadGeneration = useRef(0);
   useEffect(() => {
@@ -658,11 +659,13 @@ export default function CyberShell({ section, username }: { section: Page; usern
         </div>
         <div className="cyber-card-body">
           <div className="cyber-avatar avatar-0">
-            {connected && account.avatarUrl ? (
+            {connected && !brokenAvatars.has(account.id) ? (
               <img
-                src={account.avatarUrl}
+                src={apiPath(
+                  `/api/accounts/${encodeURIComponent(account.id)}/avatar?v=${encodeURIComponent(account.verifiedAt ?? '')}`,
+                )}
                 alt={`รูปบัญชี ${account.verifiedHandle ?? ''}`}
-                referrerPolicy="no-referrer"
+                onError={() => setBrokenAvatars((current) => new Set(current).add(account.id))}
               />
             ) : (
               <>

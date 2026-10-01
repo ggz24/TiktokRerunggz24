@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { Readable } from 'node:stream';
 import { LiveError, LiveService } from './live-service.js';
@@ -61,6 +62,47 @@ export function registerLiveRoutes(
     } catch (error) {
       return failure(reply, error);
     }
+  });
+
+  app.get('/api/v1/live/videos/:videoId/file', async (request, reply) => {
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { videoId } = request.params as { videoId: string };
+    let file: { path: string; size: number };
+    try {
+      file = await service.videoFile(ownerId, videoId);
+    } catch (error) {
+      return failure(reply, error);
+    }
+    const header = request.headers.range;
+    let start = 0;
+    let end = file.size - 1;
+    let status = 200;
+    if (typeof header === 'string') {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+      if (!match || (match[1] === '' && match[2] === '')) {
+        return reply.status(416).header('content-range', `bytes */${file.size}`).send();
+      }
+      if (match[1] === '') {
+        const suffix = Number(match[2]);
+        start = Math.max(0, file.size - suffix);
+      } else {
+        start = Number(match[1]);
+        if (match[2] !== '') end = Math.min(Number(match[2]), file.size - 1);
+      }
+      if (!(start <= end) || start >= file.size) {
+        return reply.status(416).header('content-range', `bytes */${file.size}`).send();
+      }
+      status = 206;
+    }
+    reply
+      .status(status)
+      .header('content-type', 'video/mp4')
+      .header('accept-ranges', 'bytes')
+      .header('content-length', String(end - start + 1))
+      .header('cache-control', 'private, no-store');
+    if (status === 206) reply.header('content-range', `bytes ${start}-${end}/${file.size}`);
+    return reply.send(createReadStream(file.path, { start, end }));
   });
 
   app.post('/api/v1/live/uploads', { bodyLimit: 4_096 }, async (request, reply) => {

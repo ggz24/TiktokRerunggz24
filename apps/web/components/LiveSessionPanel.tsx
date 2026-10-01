@@ -5,6 +5,7 @@ import { Play, RefreshCw, Settings, Square, Upload, X } from 'lucide-react';
 import { maxVideoBytes, uploadMp4 } from '@/lib/video-upload';
 import { apiPath } from '@/lib/base-path';
 import { confirmDialog } from '@/lib/confirm';
+import VideoPreviewModal from './VideoPreviewModal';
 
 type LiveAccount = {
   id: string;
@@ -83,6 +84,7 @@ export default function LiveSessionPanel({
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [videos, setVideos] = useState<LiveVideo[]>([]);
+  const [preview, setPreview] = useState<{ id: string; name: string } | null>(null);
   const [videoSelection, setVideoSelection] = useState<Record<string, string>>({});
   const [file, setFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -586,20 +588,32 @@ export default function LiveSessionPanel({
                     {video.status === 'converting' && ' · กำลังแปลงไฟล์'}
                     {video.status === 'failed' && ' · แปลงไฟล์ไม่สำเร็จ'}
                   </span>
-                  <button
-                    className="cyber-btn danger"
-                    type="button"
-                    disabled={busy !== ''}
-                    onClick={() => void deleteVideo(video)}
-                  >
-                    {deletingVideoId === video.id ? 'กำลังลบ…' : 'ลบ'}
-                  </button>
+                  <span style={{ display: 'flex', gap: 8 }}>
+                    {(!video.status || video.status === 'ready') && (
+                      <button
+                        className="cyber-btn cyan"
+                        type="button"
+                        onClick={() => setPreview({ id: video.id, name: video.name })}
+                      >
+                        ▶ ดู
+                      </button>
+                    )}
+                    <button
+                      className="cyber-btn danger"
+                      type="button"
+                      disabled={busy !== ''}
+                      onClick={() => void deleteVideo(video)}
+                    >
+                      {deletingVideoId === video.id ? 'กำลังลบ…' : 'ลบ'}
+                    </button>
+                  </span>
                 </div>
               ))}
             </div>
           )}
         </div>
       </section>
+      {preview && <VideoPreviewModal video={preview} onClose={() => setPreview(null)} />}
       <section className="cyber-panel">
         <div className="cyber-panel-title">
           <span className="cyber-spark">▪</span> ตั้งชื่อห้อง LIVE

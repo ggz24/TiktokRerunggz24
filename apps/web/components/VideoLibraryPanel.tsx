@@ -11,6 +11,7 @@ import {
 } from '@/lib/video-upload';
 import { apiPath } from '@/lib/base-path';
 import { confirmDialog } from '@/lib/confirm';
+import VideoPreviewModal from './VideoPreviewModal';
 
 function sizeLabel(bytes: number) {
   return bytes >= 1024 ** 3
@@ -26,6 +27,7 @@ export default function VideoLibraryPanel() {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [preview, setPreview] = useState<{ id: string; name: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async (silent = false) => {
@@ -191,20 +193,32 @@ export default function VideoLibraryPanel() {
                     {video.status === 'converting' && ' · กำลังแปลงไฟล์ (ยังใช้ไลฟ์ไม่ได้)'}
                     {video.status === 'failed' && ' · แปลงไฟล์ไม่สำเร็จ ลบแล้วอัปใหม่'}
                   </span>
-                  <button
-                    className="cyber-btn danger"
-                    type="button"
-                    disabled={busy !== ''}
-                    onClick={() => void remove(video)}
-                  >
-                    ลบ
-                  </button>
+                  <span style={{ display: 'flex', gap: 8 }}>
+                    {(!video.status || video.status === 'ready') && (
+                      <button
+                        className="cyber-btn cyan"
+                        type="button"
+                        onClick={() => setPreview({ id: video.id, name: video.name })}
+                      >
+                        ▶ ดู
+                      </button>
+                    )}
+                    <button
+                      className="cyber-btn danger"
+                      type="button"
+                      disabled={busy !== ''}
+                      onClick={() => void remove(video)}
+                    >
+                      ลบ
+                    </button>
+                  </span>
                 </div>
               ))}
             </div>
           )}
         </div>
       </section>
+      {preview && <VideoPreviewModal video={preview} onClose={() => setPreview(null)} />}
     </>
   );
 }

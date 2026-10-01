@@ -433,6 +433,21 @@ export class LiveService {
     return this.store.listVideos(ownerId);
   }
 
+  /** Location of a ready video for playback; only the owner can open it. */
+  async videoFile(
+    ownerId: string,
+    videoId: string,
+  ): Promise<{ path: string; size: number; name: string }> {
+    if (!isUuid(videoId)) throw new LiveError(400, 'Invalid video ID.');
+    const video = await this.store.findVideo(ownerId, videoId);
+    if (!video) throw new LiveError(404, 'Video not found.');
+    this.requireReadyVideo(video);
+    const path = mediaPath(this.mediaDir, videoId);
+    const stat = await fs.stat(path).catch(() => null);
+    if (!stat?.isFile()) throw new LiveError(404, 'Video file not found.');
+    return { path, size: stat.size, name: video.name };
+  }
+
   async deleteVideo(ownerId: string, videoId: string): Promise<void> {
     if (!isUuid(videoId)) throw new LiveError(400, 'Invalid video ID.');
     const result = await this.store.deleteVideo(ownerId, videoId);

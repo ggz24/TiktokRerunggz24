@@ -804,3 +804,52 @@ test('chunked uploads accept out-of-order chunks, resume from disk, and finalize
     );
   });
 });
+
+test('video playback streams byte ranges for the owner only and refuses unfinished videos', async () => {
+  await withFixture(async ({ service, accountStore }) => {
+    const app = createApp(
+      { postgres: async () => {}, redis: async () => {}, worker: async () => true },
+      { store: accountStore, encryptionKey: Buffer.alloc(32, 17), internalToken: token },
+      service,
+    );
+    const upload = await app.inject({
+      method: 'POST',
+      url: '/api/v1/live/videos',
+      headers: { ...headers, 'content-type': 'video/mp4', 'x-file-name': 'clip.mp4' },
+      payload: mp4,
+    });
+    const url = `/api/v1/live/videos/${upload.json().item.id}/file`;
+    assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
+    assert.equal(
+      (await app.inject({ method: 'GET', url, headers: { ...headers, 'x-livehub-owner': 'x2' } }))
+        .statusCode,
+      404,
+    );
+    const whole = await app.inject({ method: 'GET', url, headers });
+    assert.equal(whole.statusCode, 200);
+    assert.deepEqual(whole.rawPayload, mp4);
+    assert.equal(whole.headers['accept-ranges'], 'bytes');
+    const part = await app.inject({
+      method: 'GET',
+      url,
+      headers: { ...headers, range: 'bytes=4-7' },
+    });
+    assert.equal(part.statusCode, 206);
+    assert.equal(part.headers['content-range'], `bytes 4-7/${mp4.length}`);
+    assert.deepEqual(part.rawPayload, mp4.subarray(4, 8));
+    const tail = await app.inject({
+      method: 'GET',
+      url,
+      headers: { ...headers, range: 'bytes=-4' },
+    });
+    assert.equal(tail.statusCode, 206);
+    assert.deepEqual(tail.rawPayload, mp4.subarray(mp4.length - 4));
+    const beyond = await app.inject({
+      method: 'GET',
+      url,
+      headers: { ...headers, range: 'bytes=500-600' },
+    });
+    assert.equal(beyond.statusCode, 416);
+    await app.close();
+  });
+});

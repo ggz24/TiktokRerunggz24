@@ -657,6 +657,87 @@ export function createApp(
     }
   });
 
+  const avatarHost =
+    /(^|\.)(tiktokcdn[a-z-]*\.com|tiktok\.com|ibyteimg\.com|byteimg\.com|tiktokv\.com)$/i;
+
+  async function downloadAvatar(url: string | undefined) {
+    if (!url) return null;
+    try {
+      const target = new URL(url);
+      if (target.protocol !== 'https:' || !avatarHost.test(target.hostname)) return null;
+      const response = await fetch(target, {
+        redirect: 'error',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(8_000),
+      });
+      const type = response.headers.get('content-type') ?? '';
+      if (!response.ok || !type.startsWith('image/')) return null;
+      const bytes = Buffer.from(await response.arrayBuffer());
+      return bytes.length > 0 && bytes.length <= 2_000_000 ? { bytes, type } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  app.get('/api/v1/accounts/:id/avatar', async (request, reply) => {
+    if (!accountConfig) return reply.status(503).send({ error: 'Account checks are unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { id } = request.params as { id?: string };
+    if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid account ID.' });
+    try {
+      const current = (await accountConfig.store.list(ownerId)).find((item) => item.id === id);
+      if (!current) return reply.status(404).send({ error: 'Account not found.' });
+      const stale =
+        !current.avatarUrl ||
+        !current.verifiedAt ||
+        Date.now() - Date.parse(current.verifiedAt) > 60 * 60 * 1000;
+      let avatarUrl = current.avatarUrl;
+      let image = stale ? null : await downloadAvatar(avatarUrl);
+      if (!image) {
+        // Avatar links from TikTok expire, so re-read the profile picture from the account itself.
+        try {
+          const encrypted = await accountConfig.store.findEncrypted(ownerId, id);
+          if (encrypted) {
+            const cookieHeader = decryptAccountCookie(
+              encrypted,
+              accountConfig.encryptionKey,
+              ownerId,
+              id,
+            );
+            const userAgent = encrypted.userAgent
+              ? decryptAccountUserAgent(
+                  encrypted.userAgent,
+                  accountConfig.encryptionKey,
+                  ownerId,
+                  id,
+                )
+              : undefined;
+            const identity = await (accountConfig.identityLookup ?? lookupTikTokIdentity)(
+              cookieHeader,
+              userAgent,
+            );
+            if (identity) {
+              await accountConfig.store.setVerification(ownerId, id, identity);
+              avatarUrl = identity.avatarUrl;
+            }
+          }
+        } catch {
+          // Keep whatever picture is already stored.
+        }
+        image = await downloadAvatar(avatarUrl);
+        if (!image && stale) image = await downloadAvatar(current.avatarUrl);
+      }
+      if (!image) return reply.status(404).send({ error: 'No profile picture available.' });
+      return reply
+        .header('content-type', image.type)
+        .header('cache-control', 'private, max-age=600')
+        .send(image.bytes);
+    } catch {
+      return reply.status(503).send({ error: 'Account storage is unavailable.' });
+    }
+  });
+
   if (liveService) {
     const onRoomStarted = async (ownerId: string, accountId: string) => {
       if (!productSetStore || !accountConfig) return 'none';

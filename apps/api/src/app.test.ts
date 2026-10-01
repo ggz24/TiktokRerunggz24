@@ -932,3 +932,59 @@ test('identity lookup accepts a successful numeric error_code of zero', async ()
     globalThis.fetch = originalFetch;
   }
 });
+
+test('profile picture is served through the API and refreshed when the stored link has expired', async () => {
+  const fresh = 'https://p16-sign-sg.tiktokcdn.com/fresh.jpeg';
+  const expired = 'https://p16-sign-sg.tiktokcdn.com/expired.jpeg';
+  const fixture = accountFixture(async () => ({
+    userId: '1234567890123456789',
+    username: 'sample.user',
+    avatarUrl: fresh,
+  }));
+  const app = createApp(
+    { postgres: async () => {}, redis: async () => {}, worker: async () => true },
+    fixture.config,
+  );
+  const imported = await app.inject({
+    method: 'POST',
+    url: '/api/v1/accounts/import',
+    headers,
+    payload: { alias: 'Sample', curl: syntheticCurl },
+  });
+  const accountId = imported.json().item.id as string;
+  fixture.rows[0].avatarUrl = expired;
+  const requested: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    requested.push(url);
+    return url === fresh
+      ? new Response(Buffer.from('image-bytes'), { headers: { 'content-type': 'image/jpeg' } })
+      : new Response('gone', { status: 403 });
+  }) as typeof fetch;
+  try {
+    const url = `/api/v1/accounts/${accountId}/avatar`;
+    assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
+    assert.equal(
+      (await app.inject({ method: 'GET', url, headers: { ...headers, 'x-livehub-owner': 'x2' } }))
+        .statusCode,
+      404,
+    );
+    const picture = await app.inject({ method: 'GET', url, headers });
+    assert.equal(picture.statusCode, 200);
+    assert.equal(picture.headers['content-type'], 'image/jpeg');
+    assert.equal(picture.body, 'image-bytes');
+    assert.equal(fixture.rows[0].avatarUrl, fresh);
+    assert.ok(requested.includes(fresh));
+    // A stored link on a host that is not a TikTok image CDN is never fetched.
+    fixture.rows[0].avatarUrl = 'https://internal.example/secret.png';
+    requested.length = 0;
+    fixture.config.identityLookup = async () => null;
+    const blocked = await app.inject({ method: 'GET', url, headers });
+    assert.equal(blocked.statusCode, 404);
+    assert.equal(requested.includes('https://internal.example/secret.png'), false);
+  } finally {
+    globalThis.fetch = realFetch;
+    await app.close();
+  }
+});
