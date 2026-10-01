@@ -66,7 +66,7 @@ export interface LiveDestinationProvider {
 type SpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
 type VideoTracks = { videoCodec: string; audioCodec: string };
 type ProbeFn = (path: string) => Promise<boolean | VideoTracks>;
-type ConvertFn = (source: string, destination: string) => Promise<void>;
+type ConvertFn = (source: string, destination: string, signal?: AbortSignal) => Promise<void>;
 
 interface RunningProcess {
   status: LiveStatus;
@@ -246,11 +246,18 @@ export async function defaultProbeVideo(path: string): Promise<false | VideoTrac
   });
 }
 
-export async function defaultConvertVideo(source: string, destination: string): Promise<void> {
+export async function defaultConvertVideo(
+  source: string,
+  destination: string,
+  signal?: AbortSignal,
+): Promise<void> {
   await new Promise<void>((resolveResult, rejectResult) => {
+    // Lowest CPU priority so a long conversion never starves the web app or running streams.
+    const lowPriority = process.platform !== 'win32';
     const child = spawn(
-      'ffmpeg',
+      lowPriority ? 'nice' : 'ffmpeg',
       [
+        ...(lowPriority ? ['-n', '19', 'ffmpeg'] : []),
         '-nostdin',
         '-hide_banner',
         '-loglevel',
@@ -280,7 +287,7 @@ export async function defaultConvertVideo(source: string, destination: string): 
         '+faststart',
         destination,
       ],
-      { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false },
+      { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false, signal },
     );
     let settled = false;
     const finish = (error?: Error) => {
@@ -343,6 +350,8 @@ function uploadInfo(upload: ChunkedUpload): ChunkedUploadInfo {
 
 export class LiveService {
   private readonly chunkedUploads = new Map<string, ChunkedUpload>();
+  private readonly conversionAborts = new Map<string, AbortController>();
+  private conversionQueue: Promise<void> = Promise.resolve();
   private readonly processes = new Map<string, RunningProcess>();
   private readonly openingRooms = new Set<string>();
   private readonly deletingAccounts = new Set<string>();
@@ -421,7 +430,8 @@ export class LiveService {
     if (result === 'missing') throw new LiveError(404, 'Video not found.');
     if (result === 'in_use')
       throw new LiveError(409, 'Remove this video from live settings first.');
-    await fs.rm(mediaPath(this.mediaDir, videoId), { force: true });
+    this.conversionAborts.get(videoId)?.abort();
+    await this.removeVideoFiles(videoId);
   }
 
   async uploadVideo(ownerId: string, name: string, input: Readable): Promise<LiveVideo> {
@@ -490,35 +500,21 @@ export class LiveService {
       const canCopy =
         typeof tracks === 'boolean' ||
         (tracks.videoCodec === 'h264' && tracks.audioCodec === 'aac');
-      let storedSize = size;
       if (!canCopy) {
-        try {
-          await this.convertVideo(temporaryPath, convertedPath);
-        } catch {
-          throw new LiveError(422, 'Could not convert MP4 to H.264/AAC.');
-        }
-        const converted = await fs.stat(convertedPath).catch(() => null);
-        if (
-          !converted?.isFile() ||
-          converted.size < 12 ||
-          converted.size > MAX_VIDEO_BYTES ||
-          usedBytes + converted.size > MAX_OWNER_VIDEO_BYTES
-        ) {
-          throw new LiveError(413, 'Converted video exceeds the storage limit.');
-        }
-        const outputTracks = await this.probeVideo(convertedPath);
-        if (
-          typeof outputTracks !== 'object' ||
-          outputTracks.videoCodec !== 'h264' ||
-          outputTracks.audioCodec !== 'aac'
-        ) {
-          throw new LiveError(422, 'Converted video is not a valid H.264/AAC MP4.');
-        }
-        storedSize = converted.size;
+        // Keep the source and convert in the background so the video shows up in the library now.
+        const pending: LiveVideo = {
+          id,
+          name,
+          sizeBytes: size,
+          createdAt: new Date().toISOString(),
+          status: 'converting',
+        };
+        await this.store.insertVideo(ownerId, pending);
+        this.enqueueConversion(ownerId, pending, usedBytes);
+        return pending;
       }
-      await fs.rename(canCopy ? temporaryPath : convertedPath, finalPath);
-      if (!canCopy) await fs.rm(temporaryPath, { force: true });
-      const item = { id, name, sizeBytes: storedSize, createdAt: new Date().toISOString() };
+      await fs.rename(temporaryPath, finalPath);
+      const item = { id, name, sizeBytes: size, createdAt: new Date().toISOString() };
       await this.store.insertVideo(ownerId, item);
       return item;
     } catch (error) {
@@ -528,6 +524,90 @@ export class LiveService {
         fs.rm(finalPath, { force: true }),
       ]);
       throw error;
+    }
+  }
+
+  private requireReadyVideo(video: LiveVideo): void {
+    if (video.status && video.status !== 'ready') {
+      throw new LiveError(422, 'This video is not ready yet. Wait until conversion finishes.');
+    }
+  }
+
+  private enqueueConversion(ownerId: string, video: LiveVideo, usedBytes: number): void {
+    const controller = new AbortController();
+    this.conversionAborts.set(video.id, controller);
+    this.conversionQueue = this.conversionQueue
+      .catch(() => undefined)
+      .then(() => this.runConversion(ownerId, video, usedBytes, controller))
+      .finally(() => this.conversionAborts.delete(video.id));
+  }
+
+  /** Resolves when every queued background conversion has finished (used by tests and shutdown). */
+  async idle(): Promise<void> {
+    await this.conversionQueue.catch(() => undefined);
+  }
+
+  private async runConversion(
+    ownerId: string,
+    video: LiveVideo,
+    usedBytes: number,
+    controller: AbortController,
+  ): Promise<void> {
+    const finalPath = mediaPath(this.mediaDir, video.id);
+    const sourcePath = `${finalPath}.upload`;
+    const convertedPath = `${finalPath}.converted.mp4`;
+    const cleanup = () =>
+      Promise.allSettled([
+        fs.rm(sourcePath, { force: true }),
+        fs.rm(convertedPath, { force: true }),
+      ]);
+    try {
+      if (controller.signal.aborted || !(await this.store.findVideo(ownerId, video.id))) {
+        await cleanup();
+        return;
+      }
+      try {
+        await this.convertVideo(sourcePath, convertedPath, controller.signal);
+      } catch {
+        throw new LiveError(422, 'Could not convert MP4 to H.264/AAC.');
+      }
+      if (controller.signal.aborted) {
+        await cleanup();
+        return;
+      }
+      const converted = await fs.stat(convertedPath).catch(() => null);
+      if (
+        !converted?.isFile() ||
+        converted.size < 12 ||
+        converted.size > MAX_VIDEO_BYTES ||
+        usedBytes + converted.size > MAX_OWNER_VIDEO_BYTES
+      ) {
+        throw new LiveError(413, 'Converted video exceeds the storage limit.');
+      }
+      const outputTracks = await this.probeVideo(convertedPath);
+      if (
+        typeof outputTracks !== 'object' ||
+        outputTracks.videoCodec !== 'h264' ||
+        outputTracks.audioCodec !== 'aac'
+      ) {
+        throw new LiveError(422, 'Converted video is not a valid H.264/AAC MP4.');
+      }
+      await fs.rename(convertedPath, finalPath);
+      await fs.rm(sourcePath, { force: true });
+      await this.store.updateVideo(ownerId, video.id, {
+        status: 'ready',
+        sizeBytes: converted.size,
+        error: null,
+      });
+    } catch (error) {
+      await cleanup();
+      if (controller.signal.aborted) return;
+      await this.store
+        .updateVideo(ownerId, video.id, {
+          status: 'failed',
+          error: error instanceof LiveError ? error.message : 'Video conversion failed.',
+        })
+        .catch(() => undefined);
     }
   }
 
@@ -723,17 +803,39 @@ export class LiveService {
   }
 
   async recoverUploads(): Promise<void> {
-    // After a restart no conversion can be running: drop half-finished temp files and upload
-    // records whose chunk file is gone, but keep .part files so interrupted uploads can resume.
-    const [media, uploads] = await Promise.all([
+    // After a restart no conversion is running. Restart the ones still marked "converting" from
+    // their kept source file, drop other half-finished temp files and upload records whose chunk
+    // file is gone, and keep .part files so interrupted uploads can resume.
+    const [media, uploads, converting] = await Promise.all([
       fs.readdir(this.mediaDir).catch(() => [] as string[]),
       fs.readdir(this.uploadsDir()).catch(() => [] as string[]),
+      this.store.listConvertingVideos(),
     ]);
+    const resumable = new Set(
+      converting
+        .filter(({ video }) => media.includes(`${video.id}.mp4.upload`))
+        .map(({ video }) => `${video.id}.mp4.upload`),
+    );
     await Promise.allSettled(
       media
-        .filter((name) => name.endsWith('.mp4.upload') || name.endsWith('.mp4.converted.mp4'))
+        .filter(
+          (name) =>
+            (name.endsWith('.mp4.upload') && !resumable.has(name)) ||
+            name.endsWith('.mp4.converted.mp4'),
+        )
         .map((name) => fs.rm(resolve(this.mediaDir, name), { force: true })),
     );
+    for (const { ownerId, video } of converting) {
+      if (resumable.has(`${video.id}.mp4.upload`)) {
+        const usage = await this.store.videoUsage(ownerId);
+        this.enqueueConversion(ownerId, video, usage.bytes - video.sizeBytes);
+      } else {
+        await this.store.updateVideo(ownerId, video.id, {
+          status: 'failed',
+          error: 'Source file was lost before conversion finished.',
+        });
+      }
+    }
     const parts = new Set(uploads.filter((name) => name.endsWith('.part')));
     await Promise.allSettled(
       uploads
@@ -863,6 +965,7 @@ export class LiveService {
         throw new LiveError(422, 'Connect the account before configuring live.');
       const video = await this.store.findVideo(ownerId, input.videoId);
       if (!video) throw new LiveError(404, 'Video not found.');
+      this.requireReadyVideo(video);
       await this.store.saveConfig(ownerId, accountId, {
         videoId: input.videoId,
         rtmpUrl: encrypted(input.rtmpUrl, this.encryptionKey, `${ownerId}\0${accountId}\0rtmp-url`),
@@ -911,6 +1014,7 @@ export class LiveService {
       if (status !== 'connected') throw new LiveError(422, 'Account is not connected.');
       const video = await this.store.findVideo(ownerId, videoId);
       if (!video) throw new LiveError(404, 'Video not found.');
+      this.requireReadyVideo(video);
       const path = mediaPath(this.mediaDir, videoId);
       const file = await fs.stat(path).catch(() => null);
       if (!file?.isFile() || file.size !== video.sizeBytes || !(await this.probeVideo(path))) {
@@ -1002,6 +1106,7 @@ export class LiveService {
       if (status !== 'connected') throw new LiveError(422, 'Account is not connected.');
       const video = await this.store.findVideo(ownerId, videoId);
       if (!video) throw new LiveError(404, 'Video not found.');
+      this.requireReadyVideo(video);
       const config = await this.store.getConfig(ownerId, accountId);
       if (config) await this.store.saveConfig(ownerId, accountId, { ...config, videoId });
       await this.store.savePreferredVideoId(ownerId, accountId, videoId);
@@ -1117,6 +1222,7 @@ export class LiveService {
       if (!config) throw new LiveError(422, 'Save RTMP settings and select a video first.');
       const video = await this.store.findVideo(ownerId, config.videoId);
       if (!video) throw new LiveError(404, 'Video not found.');
+      this.requireReadyVideo(video);
       const path = mediaPath(this.mediaDir, video.id);
       const file = await fs.stat(path).catch(() => null);
       if (!file?.isFile() || file.size !== video.sizeBytes) {

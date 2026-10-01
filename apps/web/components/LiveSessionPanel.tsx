@@ -18,6 +18,7 @@ type LiveVideo = {
   name: string;
   sizeBytes: number;
   createdAt: string;
+  status?: 'ready' | 'converting' | 'failed';
 };
 
 type LiveSession = {
@@ -263,12 +264,17 @@ export default function LiveSessionPanel({
     try {
       const item = await uploadMp4(file, setUploadProgress);
       setVideos((current) => [item, ...current.filter((video) => video.id !== item.id)]);
-      if (selectedAccountId) {
+      const ready = !item.status || item.status === 'ready';
+      if (ready && selectedAccountId) {
         setVideoSelection((current) => ({ ...current, [selectedAccountId]: item.id }));
       }
       setFile(null);
       if (fileInput.current) fileInput.current.value = '';
-      setNotice('วิดีโอพร้อมใช้งานแล้ว เลือกบัญชีและตั้งค่าการส่งสัญญาณก่อนเริ่ม');
+      setNotice(
+        ready
+          ? 'วิดีโอพร้อมใช้งานแล้ว เลือกบัญชีและตั้งค่าการส่งสัญญาณก่อนเริ่ม'
+          : 'อัปโหลดสำเร็จ ระบบกำลังแปลงไฟล์เป็น H.264/AAC เบื้องหลัง ใช้ไลฟ์ได้เมื่อแปลงเสร็จ (ดูสถานะที่หน้าคลังวิดีโอ)',
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'อัปโหลดวิดีโอไม่สำเร็จ');
     } finally {
@@ -548,11 +554,13 @@ export default function LiveSessionPanel({
               disabled={!selectedAccountId || active || busy !== ''}
             >
               <option value="">เลือกวิดีโอ</option>
-              {videos.map((video) => (
-                <option key={video.id} value={video.id}>
-                  {video.name} · {(video.sizeBytes / 1024 / 1024).toFixed(1)} MB
-                </option>
-              ))}
+              {videos
+                .filter((video) => !video.status || video.status === 'ready')
+                .map((video) => (
+                  <option key={video.id} value={video.id}>
+                    {video.name} · {(video.sizeBytes / 1024 / 1024).toFixed(1)} MB
+                  </option>
+                ))}
             </select>
           </label>
           {selectedVideoId && selectedVideoId !== session?.videoId && (
@@ -572,7 +580,11 @@ export default function LiveSessionPanel({
             <div className="cyber-live-video-list">
               {videos.map((video) => (
                 <div key={video.id}>
-                  <span>{video.name}</span>
+                  <span>
+                    {video.name}
+                    {video.status === 'converting' && ' · กำลังแปลงไฟล์'}
+                    {video.status === 'failed' && ' · แปลงไฟล์ไม่สำเร็จ'}
+                  </span>
                   <button
                     className="cyber-btn danger"
                     type="button"

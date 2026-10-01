@@ -45,6 +45,10 @@ function safeVideo(value: unknown) {
     name: typeof item.name === 'string' ? item.name : '',
     sizeBytes: typeof item.sizeBytes === 'number' ? item.sizeBytes : 0,
     createdAt: typeof item.createdAt === 'string' ? item.createdAt : '',
+    status: item.status === 'converting' || item.status === 'failed' ? item.status : 'ready',
+    ...(item.status === 'failed' && typeof item.error === 'string'
+      ? { error: item.error.slice(0, 200) }
+      : {}),
   };
 }
 

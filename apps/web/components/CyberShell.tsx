@@ -461,7 +461,9 @@ export default function CyberShell({ section, username }: { section: Page; usern
       )
         throw new Error('โหลดค่าการส่งสัญญาณไม่สำเร็จ');
       if (generation !== streamLoadGeneration.current) return;
-      const items = videos.items as StreamVideo[];
+      const items = (videos.items as (StreamVideo & { status?: string })[]).filter(
+        (video) => !video.status || video.status === 'ready',
+      );
       const item = status.item as StreamSession;
       setStreamVideos(items);
       setStreamSession(item);

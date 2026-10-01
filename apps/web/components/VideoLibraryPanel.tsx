@@ -27,8 +27,8 @@ export default function VideoLibraryPanel() {
   const [notice, setNotice] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const response = await fetch(apiPath('/api/live/videos'), { cache: 'no-store' });
@@ -54,6 +54,13 @@ export default function VideoLibraryPanel() {
     void refresh();
   }, [refresh]);
 
+  const hasConverting = videos.some((video) => video.status === 'converting');
+  useEffect(() => {
+    if (!hasConverting) return;
+    const timer = setInterval(() => void refresh(true), 15000);
+    return () => clearInterval(timer);
+  }, [hasConverting, refresh]);
+
   async function upload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file || busy) return;
@@ -75,7 +82,11 @@ export default function VideoLibraryPanel() {
       setVideos((current) => [item, ...current]);
       setFile(null);
       if (fileInput.current) fileInput.current.value = '';
-      setNotice('วิดีโอพร้อมใช้งานแล้ว ระบบจะส่งสตรีมโดยไม่แปลงไฟล์ซ้ำ');
+      setNotice(
+        item.status === 'converting'
+          ? 'อัปโหลดสำเร็จ ระบบกำลังแปลงไฟล์เป็น H.264/AAC อยู่เบื้องหลัง (อาจนานหลายชั่วโมงสำหรับไฟล์ใหญ่) ปิดหน้านี้ได้ และใช้ไลฟ์ได้เมื่อแปลงเสร็จ'
+          : 'วิดีโอพร้อมใช้งานแล้ว ระบบจะส่งสตรีมโดยไม่แปลงไฟล์ซ้ำ',
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'อัปโหลดวิดีโอไม่สำเร็จ');
     } finally {
@@ -176,6 +187,8 @@ export default function VideoLibraryPanel() {
                 <div key={video.id}>
                   <span>
                     {video.name} · {sizeLabel(video.sizeBytes)}
+                    {video.status === 'converting' && ' · กำลังแปลงไฟล์ (ยังใช้ไลฟ์ไม่ได้)'}
+                    {video.status === 'failed' && ' · แปลงไฟล์ไม่สำเร็จ ลบแล้วอัปใหม่'}
                   </span>
                   <button
                     className="cyber-btn danger"

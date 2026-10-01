@@ -71,6 +71,21 @@ function fixture(
       assert.equal(who, owner);
       videos.set(video.id, video);
     },
+    updateVideo: async (who, id, patch) => {
+      assert.equal(who, owner);
+      const current = videos.get(id);
+      if (!current) return;
+      videos.set(id, {
+        ...current,
+        status: patch.status,
+        sizeBytes: patch.sizeBytes ?? current.sizeBytes,
+        error: patch.error ?? undefined,
+      });
+    },
+    listConvertingVideos: async () =>
+      [...videos.values()]
+        .filter((video) => video.status === 'converting')
+        .map((video) => ({ ownerId: owner, video })),
     deleteVideo: async (who, id) => {
       if (who !== owner || !videos.has(id)) return 'missing';
       if ([...configs.values()].some((config) => config.videoId === id)) return 'in_use';
@@ -206,14 +221,26 @@ test('video upload validates MP4 and owner metadata without accepting paths', as
   });
 });
 
-test('HEVC uploads are converted before becoming available and stream with copy', async () => {
+test('HEVC uploads appear at once as converting, become ready after background conversion, and stream with copy', async () => {
   await withFixture(
     async (context) => {
       const { service, args } = context;
-      const video = await service.uploadVideo(owner, 'hevc.mp4', Readable.from(mp4));
+      const pending = await service.uploadVideo(owner, 'hevc.mp4', Readable.from(mp4));
+      assert.equal(pending.status, 'converting');
+      await assert.rejects(
+        service.configure(owner, accountId, {
+          rtmpUrl: 'rtmps://example.invalid/live',
+          streamKey: secret,
+          videoId: pending.id,
+        }),
+        (error: unknown) => error instanceof LiveError && error.statusCode === 422,
+      );
+      await service.idle();
       assert.equal(context.conversions, 1);
+      const [video] = await service.listVideos(owner);
+      assert.equal(video.id, pending.id);
+      assert.equal(video.status, 'ready');
       assert.equal(video.sizeBytes, mp4.length);
-      assert.deepEqual(await service.listVideos(owner), [video]);
       await service.configure(owner, accountId, {
         rtmpUrl: 'rtmps://example.invalid/live',
         streamKey: secret,

@@ -8,6 +8,8 @@ export type StoredVideo = {
   name: string;
   sizeBytes: number;
   createdAt: string;
+  status?: 'ready' | 'converting' | 'failed';
+  error?: string;
 };
 
 type UploadInfo = {

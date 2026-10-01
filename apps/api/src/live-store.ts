@@ -1,10 +1,14 @@
 import type { Pool } from 'pg';
 
+export type LiveVideoStatus = 'ready' | 'converting' | 'failed';
+
 export interface LiveVideo {
   id: string;
   name: string;
   sizeBytes: number;
   createdAt: string;
+  status?: LiveVideoStatus;
+  error?: string;
 }
 
 export interface EncryptedValue {
@@ -26,6 +30,12 @@ export interface LiveStore {
   listVideos(ownerId: string): Promise<LiveVideo[]>;
   findVideo(ownerId: string, videoId: string): Promise<LiveVideo | null>;
   insertVideo(ownerId: string, video: LiveVideo): Promise<void>;
+  updateVideo(
+    ownerId: string,
+    videoId: string,
+    patch: { status: LiveVideoStatus; sizeBytes?: number; error?: string | null },
+  ): Promise<void>;
+  listConvertingVideos(): Promise<{ ownerId: string; video: LiveVideo }[]>;
   deleteVideo(ownerId: string, videoId: string): Promise<'deleted' | 'in_use' | 'missing'>;
   videoUsage(ownerId: string): Promise<{ count: number; bytes: number }>;
   listConfiguredAccountIds(ownerId: string): Promise<string[]>;
@@ -44,6 +54,11 @@ export async function ensureLiveTables(pool: Pool): Promise<void> {
       size_bytes BIGINT NOT NULL CHECK (size_bytes > 0),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+  await pool.query(`
+    ALTER TABLE livehub_live_videos
+      ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'ready',
+      ADD COLUMN IF NOT EXISTS error VARCHAR(200)
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS livehub_live_videos_owner_created_idx
@@ -83,6 +98,24 @@ export async function ensureLiveTables(pool: Pool): Promise<void> {
   `);
 }
 
+function videoFromRow(row: {
+  id: string;
+  name: string;
+  size_bytes: string;
+  created_at: Date;
+  status: LiveVideoStatus;
+  error: string | null;
+}): LiveVideo {
+  return {
+    id: row.id,
+    name: row.name,
+    sizeBytes: Number(row.size_bytes),
+    createdAt: new Date(row.created_at).toISOString(),
+    status: row.status,
+    ...(row.error ? { error: row.error } : {}),
+  };
+}
+
 export function createPgLiveStore(pool: Pool): LiveStore {
   return {
     async accountStatus(ownerId, accountId) {
@@ -98,17 +131,14 @@ export function createPgLiveStore(pool: Pool): LiveStore {
         name: string;
         size_bytes: string;
         created_at: Date;
+        status: LiveVideoStatus;
+        error: string | null;
       }>(
-        `SELECT id, name, size_bytes, created_at FROM livehub_live_videos
+        `SELECT id, name, size_bytes, created_at, status, error FROM livehub_live_videos
          WHERE owner_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200`,
         [ownerId],
       );
-      return result.rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        sizeBytes: Number(row.size_bytes),
-        createdAt: new Date(row.created_at).toISOString(),
-      }));
+      return result.rows.map(videoFromRow);
     },
     async findVideo(ownerId, videoId) {
       const result = await pool.query<{
@@ -116,27 +146,45 @@ export function createPgLiveStore(pool: Pool): LiveStore {
         name: string;
         size_bytes: string;
         created_at: Date;
+        status: LiveVideoStatus;
+        error: string | null;
       }>(
-        `SELECT id, name, size_bytes, created_at FROM livehub_live_videos
+        `SELECT id, name, size_bytes, created_at, status, error FROM livehub_live_videos
          WHERE owner_id = $1 AND id = $2`,
         [ownerId, videoId],
       );
       const row = result.rows[0];
-      return row
-        ? {
-            id: row.id,
-            name: row.name,
-            sizeBytes: Number(row.size_bytes),
-            createdAt: new Date(row.created_at).toISOString(),
-          }
-        : null;
+      return row ? videoFromRow(row) : null;
     },
     async insertVideo(ownerId, video) {
       await pool.query(
-        `INSERT INTO livehub_live_videos (id, owner_id, name, size_bytes, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [video.id, ownerId, video.name, video.sizeBytes, video.createdAt],
+        `INSERT INTO livehub_live_videos (id, owner_id, name, size_bytes, created_at, status)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [video.id, ownerId, video.name, video.sizeBytes, video.createdAt, video.status ?? 'ready'],
       );
+    },
+    async updateVideo(ownerId, videoId, patch) {
+      await pool.query(
+        `UPDATE livehub_live_videos
+         SET status = $3, size_bytes = COALESCE($4, size_bytes), error = $5
+         WHERE owner_id = $1 AND id = $2`,
+        [ownerId, videoId, patch.status, patch.sizeBytes ?? null, patch.error ?? null],
+      );
+    },
+    async listConvertingVideos() {
+      const result = await pool.query<{
+        owner_id: string;
+        id: string;
+        name: string;
+        size_bytes: string;
+        created_at: Date;
+        status: LiveVideoStatus;
+        error: string | null;
+      }>(
+        `SELECT owner_id, id, name, size_bytes, created_at, status, error
+         FROM livehub_live_videos WHERE status = 'converting' ORDER BY created_at`,
+      );
+      return result.rows.map((row) => ({ ownerId: row.owner_id, video: videoFromRow(row) }));
     },
     async videoUsage(ownerId) {
       const result = await pool.query<{ count: string; bytes: string }>(
