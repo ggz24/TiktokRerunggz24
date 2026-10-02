@@ -18,11 +18,8 @@ export async function sendLiveChatWithSession(
   const request = parseLiveChatCurl(capture);
   const content = options.content.trim();
   // eslint-disable-next-line no-control-regex -- reject control bytes before transmission
-  if (
-    !content ||
-    Array.from(content).length > 100 ||
-    /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(content)
-  )
+  const hasControl = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(content);
+  if (!content || Array.from(content).length > 100 || hasControl)
     throw new Error('Chat message must contain 1 to 100 characters.');
   const roomId = options.roomId ?? request.roomId;
   if (!/^\d{8,24}$/.test(roomId) || (await options.currentRoom()) !== roomId)
