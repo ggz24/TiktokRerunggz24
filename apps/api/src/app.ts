@@ -20,6 +20,10 @@ import type { AutoLiveManager } from './auto-live.js';
 import type { LiveService } from './live-service.js';
 import { sendLiveProductAdd, type ProductAddSender } from './live-product-add.js';
 import type { ProductSetInput, ProductSetStore } from './product-set-store.js';
+import type { CommentReplyService } from './ai-comments.js';
+import { registerAiCommentRoutes } from './ai-comment-routes.js';
+import type { ChatBridge } from './chat-bridge.js';
+import { registerChatBridgeRoutes } from './chat-bridge-routes.js';
 
 const require = createRequire(import.meta.url);
 const { createMockEvent, validateEvent } =
@@ -48,6 +52,8 @@ export function createApp(
   productAddSender: ProductAddSender = sendLiveProductAdd,
   productSetStore?: ProductSetStore,
   autoLive?: AutoLiveManager,
+  commentReplies?: CommentReplyService,
+  chatBridge?: ChatBridge,
 ) {
   if (accountConfig) validateAccountConfig(accountConfig);
   const app = Fastify({ logger: false, requestTimeout: 3_600_000 });
@@ -68,6 +74,22 @@ export function createApp(
   function validAccountId(id: string | undefined): id is string {
     return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
   }
+
+  if (commentReplies && accountConfig) {
+    registerAiCommentRoutes(
+      app,
+      commentReplies,
+      ownerFromHeaders,
+      async (owner, id) => !!(await accountConfig.store.findEncrypted(owner, id)),
+    );
+  }
+  if (chatBridge && accountConfig)
+    registerChatBridgeRoutes(
+      app,
+      chatBridge,
+      ownerFromHeaders,
+      async (owner, id) => !!(await accountConfig.store.findEncrypted(owner, id)),
+    );
 
   app.get('/health/live', async () => ({ status: 'alive', service: 'api' }));
 

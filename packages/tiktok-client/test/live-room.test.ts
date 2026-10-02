@@ -30,6 +30,17 @@ const success = {
   },
 };
 
+test('room rejection exposes only a bounded numeric status code', () => {
+  assert.throws(
+    () => parseCreatedRoom({ status_code: 12345, message: 'private-cookie' }),
+    /code: 12345/,
+  );
+  assert.throws(
+    () => parseCreatedRoom({ status_code: 'private-cookie', message: 'private-key' }),
+    (error) => error instanceof Error && error.message === 'TikTok did not create a LIVE room.',
+  );
+});
+
 test('builds a signed create request and parses the room without a real network call', async () => {
   let called = false;
   const room = await createTikTokLiveRoom(

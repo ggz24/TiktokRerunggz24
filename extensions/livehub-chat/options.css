@@ -1,0 +1,41 @@
+body {
+  font:
+    14px/1.6 system-ui,
+    sans-serif;
+  background: #201e38;
+  color: #f0f0fa;
+  max-width: 580px;
+  min-width: 360px;
+  margin: 0;
+  padding: 24px;
+}
+h1 {
+  font-size: 20px;
+  color: #54e4ff;
+}
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  background: #16152a;
+  color: #fff;
+  border: 1px solid #8363ba;
+  margin: 8px 0;
+}
+button {
+  padding: 10px 16px;
+  border: 1px solid #ba99ff;
+  background: #383053;
+  color: #fff;
+  cursor: pointer;
+  margin-right: 8px;
+}
+#save {
+  background: #e72194;
+}
+p {
+  color: #b7b1d4;
+}
+label {
+  display: block;
+}

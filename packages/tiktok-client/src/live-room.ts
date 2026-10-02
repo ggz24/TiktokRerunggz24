@@ -117,7 +117,12 @@ function validSignature(value: unknown): value is RoomSignature {
 export function parseCreatedRoom(payload: unknown): CreatedRoom {
   const root = record(payload);
   if (!root || string(root.status_code) !== '0') {
-    throw new Error('TikTok did not create a LIVE room.');
+    const code = string(root?.status_code);
+    throw new Error(
+      /^\d{1,10}$/.test(code)
+        ? `TikTok did not create a LIVE room (code: ${code}).`
+        : 'TikTok did not create a LIVE room.',
+    );
   }
   const data = record(root.data);
   const room = record(data?.room) ?? data;

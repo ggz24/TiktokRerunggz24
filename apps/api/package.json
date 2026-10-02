@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test": "tsx --test src/app.test.ts src/live-service.test.ts src/auto-live.test.ts src/cloud-transcode.test.ts",
+    "test": "tsx --test src/app.test.ts src/live-service.test.ts src/auto-live.test.ts src/cloud-transcode.test.ts src/ai-comments.test.ts src/chat-bridge.test.ts src/server-chat.test.ts src/session-chat.test.ts",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:validate": "prisma validate --schema prisma/schema.prisma",
     "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
@@ -19,7 +19,9 @@
     "@prisma/client": "6.12.0",
     "fastify": "^5.6.0",
     "pg": "^8.16.0",
-    "redis": "^5.8.0"
+    "playwright-core": "^1.63.0",
+    "redis": "^5.8.0",
+    "tiktok-live-connector": "^2.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

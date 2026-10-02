@@ -1058,13 +1058,19 @@ export class LiveService {
       try {
         room = await this.autoRoomCreator({ title: title.trim(), cookieHeader, userAgent });
       } catch (error) {
+        const rejectionCode =
+          error instanceof Error
+            ? /^TikTok did not create a LIVE room \(code: (\d{1,10})\)\.$/.exec(error.message)?.[1]
+            : undefined;
         console.error(
           '[live] room creation failed:',
           error instanceof Error ? error.message : 'unknown error',
         );
         throw new LiveError(
           502,
-          'TikTok did not create a LIVE room. Check the session and signer setup.',
+          rejectionCode
+            ? `TikTok rejected LIVE creation (code: ${rejectionCode}).`
+            : 'TikTok did not create a LIVE room. Check the session and signer setup.',
         );
       }
       if (

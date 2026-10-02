@@ -8,6 +8,7 @@ import VideoLibraryPanel from './VideoLibraryPanel';
 import ProductCurlPanel from './ProductCurlPanel';
 import QuickProductSetPanel from './QuickProductSetPanel';
 import AutoLiveSettingsPanel from './AutoLiveSettingsPanel';
+import AiCommentReplyPanel from './AiCommentReplyPanel';
 import {
   CircleCheck,
   LogOut,
@@ -152,6 +153,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
   const [mobile, setMobile] = useState(false);
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState('');
+  const [accountSettingsTab, setAccountSettingsTab] = useState<'general' | 'ai'>('general');
   const [systemStatus, setSystemStatus] = useState<'checking' | 'ready' | 'degraded' | 'offline'>(
     'checking',
   );
@@ -281,6 +283,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     setStreamSetupNotice('');
   }
   function openAccountSettings(account: SavedAccount) {
+    setAccountSettingsTab('general');
     const generation = ++streamLoadGeneration.current;
     setSelectedAccount(account);
     setAccountAlias(account.alias);
@@ -341,6 +344,17 @@ export default function CyberShell({ section, username }: { section: Page; usern
         },
       );
       if (!response.ok) {
+        const detail: unknown = await response.json().catch(() => null);
+        if (
+          detail &&
+          typeof detail === 'object' &&
+          'error' in detail &&
+          typeof detail.error === 'string' &&
+          detail.error.startsWith('TikTok ') &&
+          detail.error.length <= 200
+        ) {
+          throw new Error(detail.error);
+        }
         if (response.status === 409) throw new Error('สถานะสตรีมเปลี่ยนไป กรุณาลองอีกครั้ง');
         throw new Error('สร้างห้องหรือเริ่มส่งวิดีโอไม่สำเร็จ กรุณาตรวจบัญชีและบริการดึงคีย์');
       }
@@ -858,11 +872,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
     );
   }
   function commentsView() {
-    return (
-      <Panel title="ตอบอัตโนมัติ">
-        <p className="cyber-account-empty">ยังไม่มีการตั้งค่าการตอบอัตโนมัติที่บันทึกไว้</p>
-      </Panel>
-    );
+    return <AiCommentReplyPanel />;
   }
   function analyticsView() {
     return (
@@ -1155,130 +1165,160 @@ export default function CyberShell({ section, username }: { section: Page; usern
                 </div>
               </form>
             ) : modal === 'ตั้งค่าบัญชี' && selectedAccount ? (
-              <form onSubmit={saveAccountSettings}>
-                <div className="cyber-modal-body cyber-account-form">
-                  <p>
-                    ตั้งค่าบัญชี{' '}
-                    {selectedAccount.verifiedHandle
-                      ? `@${selectedAccount.verifiedHandle}`
-                      : selectedAccount.alias}{' '}
-                    สำหรับการใช้งานในเว็บนี้
-                  </p>
-                  <label>
-                    ชื่อเรียกบัญชี
-                    <input
-                      value={accountAlias}
-                      onChange={(event) => setAccountAlias(event.target.value)}
-                      maxLength={80}
-                      required
-                    />
-                  </label>
-                  <label>
-                    ชื่อไลฟ์เริ่มต้น
-                    <input
-                      value={accountLiveTitle}
-                      onChange={(event) => setAccountLiveTitle(event.target.value)}
-                      placeholder="ตั้งชื่อไลฟ์สำหรับบัญชีนี้"
-                      maxLength={120}
-                    />
-                  </label>
-                  <p>เมื่อกดเริ่มไลฟ์ ระบบจะใช้ชื่อนี้สร้างห้องและดึงคีย์โดยอัตโนมัติ</p>
-                  <div className="cyber-stream-settings">
-                    <strong>วิดีโอที่จะใช้ไลฟ์</strong>
-                    <p>เลือก MP4 แล้วกดบันทึกการตั้งค่า ระบบจะสร้างห้องใหม่เมื่อกดเริ่มไลฟ์</p>
-                    {streamLoading ? (
-                      <p>กำลังโหลดค่าการสตรีม…</p>
-                    ) : (
-                      <>
-                        <label>
-                          วิดีโอ MP4
-                          <select
-                            value={streamVideoId}
-                            onChange={(event) => setStreamVideoId(event.target.value)}
-                            disabled={streamBusy !== '' || streamSession?.status === 'live'}
-                          >
-                            <option value="">เลือกวิดีโอ</option>
-                            {streamVideos.map((video) => (
-                              <option key={video.id} value={video.id}>
-                                {video.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        {streamVideos.length === 0 && <p>อัปโหลด MP4 ในหน้า Live Session ก่อน</p>}
-                        <label>
-                          RTMP URL
-                          <input
-                            value={streamUrl}
-                            onChange={(event) => setStreamUrl(event.target.value)}
-                            placeholder="rtmp:// หรือ rtmps://"
-                            autoComplete="off"
-                            spellCheck={false}
-                          />
-                        </label>
-                        <label>
-                          Stream key
-                          <input
-                            type="password"
-                            value={streamKey}
-                            onChange={(event) => setStreamKey(event.target.value)}
-                            placeholder={
-                              streamSession?.hasRtmpConfig
-                                ? 'กรอกเมื่อต้องการเปลี่ยนปลายทาง'
-                                : 'วาง key ที่นี่'
-                            }
-                            autoComplete="new-password"
-                            spellCheck={false}
-                          />
-                        </label>
-                        <p>ระบบเก็บปลายทางแบบเข้ารหัส และไม่ส่ง key กลับมาแสดงอีก</p>
-                        <button
-                          type="button"
-                          className="cyber-btn pink"
-                          onClick={() => void saveStreamConfig()}
-                          disabled={
-                            !streamVideoId ||
-                            !streamUrl.trim() ||
-                            !streamKey.trim() ||
-                            streamBusy !== '' ||
-                            streamSession?.status === 'live'
-                          }
-                        >
-                          {streamBusy === 'config'
-                            ? 'กำลังบันทึก…'
-                            : streamSession?.hasRtmpConfig
-                              ? 'เปลี่ยนปลายทาง'
-                              : 'บันทึกปลายทางครั้งแรก'}
-                        </button>
-                      </>
-                    )}
-                    {streamSetupError && (
-                      <p className="cyber-account-error" role="alert">
-                        {streamSetupError}
-                      </p>
-                    )}
-                    {streamSetupNotice && (
-                      <p className="cyber-live-notice" role="status">
-                        {streamSetupNotice}
-                      </p>
-                    )}
+              <>
+                <div className="cyber-modal-actions" role="tablist" aria-label="ตั้งค่าบัญชี">
+                  <button
+                    className="cyber-btn"
+                    type="button"
+                    role="tab"
+                    aria-selected={accountSettingsTab === 'general'}
+                    onClick={() => setAccountSettingsTab('general')}
+                  >
+                    ทั่วไป / อัตโนมัติ
+                  </button>
+                  <button
+                    className="cyber-btn"
+                    type="button"
+                    role="tab"
+                    aria-selected={accountSettingsTab === 'ai'}
+                    onClick={() => setAccountSettingsTab('ai')}
+                  >
+                    AI ช่วยตอบ
+                  </button>
+                </div>
+                {accountSettingsTab === 'ai' ? (
+                  <div className="cyber-modal-body">
+                    <AiCommentReplyPanel accountId={selectedAccount.id} />
                   </div>
-                  <AutoLiveSettingsPanel accountId={selectedAccount.id} />
-                  {accountFormError && (
-                    <p className="cyber-account-error" role="alert">
-                      {accountFormError}
-                    </p>
-                  )}
-                </div>
-                <div className="cyber-modal-actions">
-                  <Btn onClick={closeModal} disabled={settingsSubmitting}>
-                    ยกเลิก
-                  </Btn>
-                  <Btn tone="pink" type="submit" disabled={settingsSubmitting}>
-                    {settingsSubmitting ? 'กำลังบันทึก…' : 'บันทึกการตั้งค่า'}
-                  </Btn>
-                </div>
-              </form>
+                ) : (
+                  <form onSubmit={saveAccountSettings}>
+                    <div className="cyber-modal-body cyber-account-form">
+                      <p>
+                        ตั้งค่าบัญชี{' '}
+                        {selectedAccount.verifiedHandle
+                          ? `@${selectedAccount.verifiedHandle}`
+                          : selectedAccount.alias}{' '}
+                        สำหรับการใช้งานในเว็บนี้
+                      </p>
+                      <label>
+                        ชื่อเรียกบัญชี
+                        <input
+                          value={accountAlias}
+                          onChange={(event) => setAccountAlias(event.target.value)}
+                          maxLength={80}
+                          required
+                        />
+                      </label>
+                      <label>
+                        ชื่อไลฟ์เริ่มต้น
+                        <input
+                          value={accountLiveTitle}
+                          onChange={(event) => setAccountLiveTitle(event.target.value)}
+                          placeholder="ตั้งชื่อไลฟ์สำหรับบัญชีนี้"
+                          maxLength={120}
+                        />
+                      </label>
+                      <p>เมื่อกดเริ่มไลฟ์ ระบบจะใช้ชื่อนี้สร้างห้องและดึงคีย์โดยอัตโนมัติ</p>
+                      <div className="cyber-stream-settings">
+                        <strong>วิดีโอที่จะใช้ไลฟ์</strong>
+                        <p>เลือก MP4 แล้วกดบันทึกการตั้งค่า ระบบจะสร้างห้องใหม่เมื่อกดเริ่มไลฟ์</p>
+                        {streamLoading ? (
+                          <p>กำลังโหลดค่าการสตรีม…</p>
+                        ) : (
+                          <>
+                            <label>
+                              วิดีโอ MP4
+                              <select
+                                value={streamVideoId}
+                                onChange={(event) => setStreamVideoId(event.target.value)}
+                                disabled={streamBusy !== '' || streamSession?.status === 'live'}
+                              >
+                                <option value="">เลือกวิดีโอ</option>
+                                {streamVideos.map((video) => (
+                                  <option key={video.id} value={video.id}>
+                                    {video.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            {streamVideos.length === 0 && (
+                              <p>อัปโหลด MP4 ในหน้า Live Session ก่อน</p>
+                            )}
+                            <label>
+                              RTMP URL
+                              <input
+                                value={streamUrl}
+                                onChange={(event) => setStreamUrl(event.target.value)}
+                                placeholder="rtmp:// หรือ rtmps://"
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label>
+                              Stream key
+                              <input
+                                type="password"
+                                value={streamKey}
+                                onChange={(event) => setStreamKey(event.target.value)}
+                                placeholder={
+                                  streamSession?.hasRtmpConfig
+                                    ? 'กรอกเมื่อต้องการเปลี่ยนปลายทาง'
+                                    : 'วาง key ที่นี่'
+                                }
+                                autoComplete="new-password"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <p>ระบบเก็บปลายทางแบบเข้ารหัส และไม่ส่ง key กลับมาแสดงอีก</p>
+                            <button
+                              type="button"
+                              className="cyber-btn pink"
+                              onClick={() => void saveStreamConfig()}
+                              disabled={
+                                !streamVideoId ||
+                                !streamUrl.trim() ||
+                                !streamKey.trim() ||
+                                streamBusy !== '' ||
+                                streamSession?.status === 'live'
+                              }
+                            >
+                              {streamBusy === 'config'
+                                ? 'กำลังบันทึก…'
+                                : streamSession?.hasRtmpConfig
+                                  ? 'เปลี่ยนปลายทาง'
+                                  : 'บันทึกปลายทางครั้งแรก'}
+                            </button>
+                          </>
+                        )}
+                        {streamSetupError && (
+                          <p className="cyber-account-error" role="alert">
+                            {streamSetupError}
+                          </p>
+                        )}
+                        {streamSetupNotice && (
+                          <p className="cyber-live-notice" role="status">
+                            {streamSetupNotice}
+                          </p>
+                        )}
+                      </div>
+                      <AutoLiveSettingsPanel accountId={selectedAccount.id} />
+                      {accountFormError && (
+                        <p className="cyber-account-error" role="alert">
+                          {accountFormError}
+                        </p>
+                      )}
+                    </div>
+                    <div className="cyber-modal-actions">
+                      <Btn onClick={closeModal} disabled={settingsSubmitting}>
+                        ยกเลิก
+                      </Btn>
+                      <Btn tone="pink" type="submit" disabled={settingsSubmitting}>
+                        {settingsSubmitting ? 'กำลังบันทึก…' : 'บันทึกการตั้งค่า'}
+                      </Btn>
+                    </div>
+                  </form>
+                )}
+              </>
             ) : modal === 'เพิ่มสินค้า' && selectedAccount ? (
               <div>
                 <div className="cyber-modal-body">

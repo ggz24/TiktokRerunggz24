@@ -21,7 +21,7 @@
     "start:web": "npm run start -w @live-hub/web",
     "start:api": "npm run start -w @live-hub/api",
     "start:worker": "npm run start -w @live-hub/worker",
-    "test": "npm run test -w @live-hub/shared && npm run test -w @live-hub/tiktok-client && npm run test -w @live-hub/api && npm run test -w @live-hub/worker",
+    "test": "npm run test -w @live-hub/shared && npm run test -w @live-hub/tiktok-client && npm run test -w @live-hub/api && npm run test -w @live-hub/worker && node --test extensions/livehub-chat/bridge.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,cjs,mjs,json,css,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,cjs,mjs,json,css,yml,yaml}\"",

@@ -85,6 +85,7 @@ const ADD_PATH = '/api/v1/streamer_desktop/live_product/add';
 const DELETE_PATH = '/api/v1/streamer_desktop/live_product/delete';
 
 interface ParsedShopCurl {
+  requestHeaders: Record<string, string>;
   url: string;
   body: string;
   data: Record<string, unknown>;
@@ -94,7 +95,7 @@ interface ParsedShopCurl {
   region?: string;
 }
 
-function parseShopCurl(input: string, pathname: string): ParsedShopCurl {
+export function parseShopCurl(input: string, pathname: string): ParsedShopCurl {
   const tokens = tokenize(input);
   if (!/^(curl|curl\.exe)$/i.test(tokens[0] ?? '')) invalid();
   let urlText: string | undefined;
@@ -189,6 +190,19 @@ function parseShopCurl(input: string, pathname: string): ParsedShopCurl {
   if (userAgent && (userAgent.length > 500 || /[^\x20-\x7e]/.test(userAgent))) invalid();
   if (region && !/^[a-z]{2}$/i.test(region)) invalid();
   return {
+    requestHeaders: Object.fromEntries(
+      [...headers].filter(([name]) =>
+        [
+          'accept',
+          'accept-language',
+          'x-secsdk-csrf-token',
+          'x-tt-passport-csrf-token',
+          'x-tt-csrf-token',
+          'x-tt-store-region',
+          'x-tt-store-region-src',
+        ].includes(name),
+      ),
+    ),
     url: url.href,
     body,
     data,

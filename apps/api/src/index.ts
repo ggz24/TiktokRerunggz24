@@ -8,7 +8,14 @@ import { promises as fsPromises } from 'node:fs';
 import { createCloudTranscoder } from './cloud-transcode.js';
 import { defaultConvertVideo, LiveService } from './live-service.js';
 import { AutoLiveManager, ensureAutoLiveTable } from './auto-live.js';
+import { SessionChat, ensureSessionChatTables } from './session-chat.js';
+import { ChatBridge } from './chat-bridge.js';
 import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
+import {
+  CommentReplyService,
+  createPgCommentReplyStore,
+  ensureCommentReplyTables,
+} from './ai-comments.js';
 import {
   createRapidApiRoomSigner,
   createTikTokLiveRoom,
@@ -44,11 +51,17 @@ const accountConfig: AccountConfig | undefined =
     : undefined;
 let liveService: LiveService | undefined;
 let autoLive: AutoLiveManager | undefined;
+let commentReplies: CommentReplyService | undefined;
+let chatBridge: ChatBridge | undefined;
+let serverChat: SessionChat | undefined;
+let chatTimer: ReturnType<typeof setInterval> | undefined;
 if (accountConfig) {
   await ensureAccountTable(pool);
   await ensureLiveTables(pool);
   await ensureAutoLiveTable(pool);
   await ensureProductSetTable(pool);
+  await ensureCommentReplyTables(pool);
+  await ensureSessionChatTables(pool);
   const rapidApiKey = process.env.RAPIDAPI_KEY?.trim();
   const autoRoomCreator = rapidApiKey
     ? async ({
@@ -151,6 +164,48 @@ if (accountConfig) {
   );
   void liveService.recoverUploads().catch(() => undefined);
   autoLive = new AutoLiveManager(pool, liveService, accountConfig.store);
+  chatBridge = new ChatBridge(async (owner, account) => {
+    const roomId = await liveService!.currentRoomId(owner, account);
+    const session = await liveService!.session(owner, account);
+    const metadata = (await accountConfig.store.list(owner)).find((a) => a.id === account);
+    const userId = await accountConfig.store.getVerifiedUserId(owner, account);
+    if (!roomId || session.status !== 'live' || !metadata?.verifiedHandle || !userId) return null;
+    return { roomId, handle: metadata.verifiedHandle.replace(/^@/, ''), userId };
+  });
+  serverChat = new SessionChat(pool, accountConfig.encryptionKey, async (owner, account) => {
+    const metadata = (await accountConfig.store.list(owner)).find((a) => a.id === account);
+    const userId = await accountConfig.store.getVerifiedUserId(owner, account);
+    if (!userId || metadata?.verificationStatus !== 'connected' || !metadata.verifiedHandle)
+      return null;
+    return {
+      handle: metadata.verifiedHandle.replace(/^@/, ''),
+      userId,
+    };
+  });
+  commentReplies = new CommentReplyService(
+    createPgCommentReplyStore(pool, accountConfig.encryptionKey),
+    undefined,
+    serverChat,
+  );
+  chatBridge.attach(commentReplies);
+  serverChat.attach(commentReplies);
+  let chatSyncing = false;
+  chatTimer = setInterval(() => {
+    if (chatSyncing) return;
+    chatSyncing = true;
+    void pool
+      .query<{ owner_id: string; account_id: string }>(
+        "SELECT owner_id,account_id FROM livehub_ai_reply_settings WHERE settings->>'enabled' = 'true'",
+      )
+      .then(async (r) => {
+        for (const row of r.rows) await serverChat!.ready(row.owner_id, row.account_id);
+      })
+      .catch(() => {})
+      .finally(() => {
+        chatSyncing = false;
+      });
+  }, 10000);
+  chatTimer.unref();
 }
 
 const app = createApp(
@@ -172,9 +227,14 @@ const app = createApp(
   undefined,
   accountConfig ? createPgProductSetStore(pool, accountConfig.encryptionKey) : undefined,
   autoLive,
+  commentReplies,
+  chatBridge,
 );
 
 async function shutdown() {
+  chatBridge?.close();
+  if (chatTimer) clearInterval(chatTimer);
+  await serverChat?.close();
   autoLive?.stop();
   await app.close();
   await pool.end();

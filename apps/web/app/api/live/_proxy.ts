@@ -172,7 +172,26 @@ export async function proxyLive(
         ? { duplex: 'half' as const }
         : {}),
     } as RequestInit & { duplex?: 'half' });
-    if (!response.ok) return upstreamError(response.status);
+    if (!response.ok) {
+      if (path.endsWith('/start-auto') || path.endsWith('/auto-destination')) {
+        const data = asRecord(await response.json().catch(() => null));
+        const code =
+          typeof data.error === 'string'
+            ? /^TikTok rejected LIVE creation \(code: (\d{1,10})\)\.$/.exec(data.error)?.[1]
+            : undefined;
+        if (code)
+          return liveError(
+            `TikTok ปฏิเสธการสร้างห้อง LIVE (รหัส ${code}) กรุณาตรวจสิทธิ์ LIVE และ session ของบัญชี`,
+            502,
+          );
+        if (data.error === 'TikTok did not create a LIVE room. Check the session and signer setup.')
+          return liveError(
+            'TikTok ไม่ยอมสร้างห้อง LIVE กรุณาตรวจสิทธิ์ LIVE, session และบริการดึงคีย์',
+            502,
+          );
+      }
+      return upstreamError(response.status);
+    }
     if (response.status === 204) return new Response(null, { status: 204, headers: noStore });
     const result: unknown = await response.json();
     const safe = safeResult(path, result);

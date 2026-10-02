@@ -12,6 +12,15 @@ export {
 export type { ParsedLiveProductAddCurl, ParsedLiveProductDeleteCurl } from './live-product-curl';
 export { parseProxyConfig } from './proxy';
 export {
+  parseLiveChatCurl,
+  summarizeLiveChatCapture,
+  inspectLiveChatResponse,
+} from './live-chat-curl';
+export type { ParsedLiveChatCurl } from './live-chat-curl';
+export { decodeLiveChatFrame } from './live-chat-frame';
+export { sendCapturedLiveChat, sendLiveChatWithSession } from './live-chat-http';
+export type { LiveChatEvent } from './live-chat-frame';
+export {
   createTikTokLiveRoom,
   endTikTokLiveRoom,
   checkTikTokLiveRoom,
