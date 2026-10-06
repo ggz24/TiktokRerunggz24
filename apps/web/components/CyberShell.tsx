@@ -9,6 +9,7 @@ import ProductCurlPanel from './ProductCurlPanel';
 import QuickProductSetPanel from './QuickProductSetPanel';
 import AutoLiveSettingsPanel from './AutoLiveSettingsPanel';
 import AiCommentReplyPanel from './AiCommentReplyPanel';
+import BoxphonePanel from './BoxphonePanel';
 import {
   CircleCheck,
   LogOut,
@@ -35,6 +36,7 @@ type Page =
   | 'playlists'
   | 'products'
   | 'comments'
+  | 'boxphone'
   | 'analytics'
   | 'sales'
   | 'logs'
@@ -43,6 +45,7 @@ const primary: { id: Page; mark: string; label: string }[] = [
   { id: 'dashboard', mark: '[#]', label: 'บัญชีไลฟ์' },
   { id: 'videos', mark: '[>]', label: 'คลังวิดีโอ' },
   { id: 'comments', mark: '[~]', label: 'ตอบอัตโนมัติ' },
+  { id: 'boxphone', mark: '[B]', label: 'Boxphone' },
   { id: 'analytics', mark: '[%]', label: 'สถิติ AI' },
   { id: 'sales', mark: '[฿]', label: 'ยอดขาย' },
 ];
@@ -62,6 +65,7 @@ const names: Record<Page, string> = {
   playlists: 'Playlist',
   products: 'Product Set',
   comments: 'ตอบอัตโนมัติ',
+  boxphone: 'Boxphone · ควบคุมมือถือ',
   analytics: 'สถิติการตอบของ AI',
   sales: 'ยอดขายไลฟ์',
   logs: 'บันทึกระบบ',
@@ -1060,6 +1064,8 @@ export default function CyberShell({ section, username }: { section: Page; usern
             <ProductCurlPanel />
           ) : section === 'comments' ? (
             commentsView()
+          ) : section === 'boxphone' ? (
+            <BoxphonePanel />
           ) : section === 'analytics' ? (
             analyticsView()
           ) : (

@@ -18,6 +18,17 @@ export default tseslint.config(
     },
   },
   {
+    // Vendored local Boxphone program: it deliberately swallows ADB/phone read errors and fails closed.
+    files: ['tools/boxphone-lab/**/*.{js,mjs}'],
+    rules: {
+      'preserve-caught-error': 'off',
+      'no-empty': 'off',
+      'no-control-regex': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-expressions': 'off',
+    },
+  },
+  {
     files: ['**/*.cjs'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',

@@ -2827,3 +2827,41 @@
     grid-template-columns: 1fr;
   }
 }
+.boxphone-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.boxphone-heading h2 {
+  color: var(--cyber-cyan);
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.boxphone-heading p {
+  margin: 0;
+  color: var(--cyber-muted);
+  font-size: 11px;
+}
+.boxphone-frame {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 170px);
+  min-height: 650px;
+  border: var(--cyber-edge);
+  border-radius: 0;
+  background: var(--cyber-bg);
+  box-shadow: var(--cyber-shadow);
+}
+@media (max-width: 700px) {
+  .boxphone-frame {
+    height: calc(100vh - 140px);
+    min-height: 520px;
+  }
+  .boxphone-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

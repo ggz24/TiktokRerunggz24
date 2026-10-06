@@ -6,6 +6,7 @@ export const sections = [
   ['playlists', 'เพลย์ลิสต์', 'ListVideo'],
   ['products', 'ชุดสินค้า', 'Package'],
   ['comments', 'คอมเมนต์ + AI', 'MessageSquare'],
+  ['boxphone', 'Boxphone', 'Smartphone'],
   ['analytics', 'วิเคราะห์', 'ChartNoAxesCombined'],
   ['sales', 'ยอดขาย', 'ChartNoAxesCombined'],
   ['logs', 'บันทึกระบบ', 'ScrollText'],

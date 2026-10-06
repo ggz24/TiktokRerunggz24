@@ -1,0 +1,356 @@
+/* Load Live Hub cyber.css first: share its font, palette and design tokens. */
+.boxphone-theme {
+  display: block;
+  min-height: 100vh;
+  background: var(--cyber-bg);
+  color-scheme: dark;
+  font-size: 14px;
+}
+.boxphone-theme header {
+  padding: 16px 20px;
+  background: var(--cyber-sidebar-bg);
+  border-bottom: 3px solid var(--cyber-purple);
+  gap: 16px;
+}
+.boxphone-theme h1 {
+  color: var(--cyber-cyan);
+  font-size: 16px;
+  font-weight: 700;
+}
+.boxphone-theme h1 small {
+  font-size: 10px;
+  color: var(--cyber-muted);
+}
+.boxphone-theme .layout {
+  max-width: none;
+  padding: 20px 16px;
+  gap: 20px;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+.boxphone-theme .layout > * {
+  min-width: 0;
+}
+.boxphone-theme .card {
+  padding: 18px;
+  margin-bottom: 24px;
+  border: var(--cyber-edge);
+  border-radius: 0;
+  background: var(--cyber-panel-bg);
+  box-shadow: var(--cyber-shadow);
+}
+.boxphone-theme h2,
+.boxphone-theme summary {
+  color: var(--cyber-cyan);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+.boxphone-theme .card > h2,
+.boxphone-theme .card > details > summary {
+  margin: -18px -18px 16px;
+  padding: 13px 16px;
+  border-bottom: 2px solid var(--cyber-purple);
+  background: #2d2748;
+}
+.boxphone-theme h2::before {
+  content: '▪';
+  color: var(--cyber-pink);
+  margin-right: 9px;
+}
+.boxphone-theme details:not([open]) > summary {
+  margin-bottom: -18px;
+}
+.boxphone-theme button {
+  min-height: 35px;
+  padding: 7px 12px;
+  border: 2px solid var(--cyber-purple-light);
+  border-radius: 0;
+  color: var(--cyber-ink);
+  background: #30294f;
+  box-shadow: 3px 3px 0 #0c0a1b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+  transition:
+    transform 0.12s,
+    box-shadow 0.12s,
+    background-color 0.12s;
+}
+.boxphone-theme button:hover {
+  background: #463566;
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 #0c0a1b;
+}
+.boxphone-theme button:active {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+.boxphone-theme button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+.boxphone-theme button.primary {
+  border-color: var(--cyber-cyan);
+  color: #172334;
+  background: var(--cyber-cyan);
+}
+.boxphone-theme button.primary:hover {
+  background: #96f3ff;
+}
+.boxphone-theme button.danger {
+  border-color: #fff;
+  color: #fff;
+  background: var(--cyber-pink);
+}
+.boxphone-theme button.danger:hover {
+  background: #e81982;
+}
+.boxphone-theme button.mini {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 10px;
+}
+.boxphone-theme input[type='password'],
+.boxphone-theme input[type='number'],
+.boxphone-theme input[type='text'],
+.boxphone-theme textarea,
+.boxphone-theme select {
+  min-height: 35px;
+  padding: 8px 10px !important;
+  border: 1px solid #886bb3 !important;
+  border-radius: 0 !important;
+  color: var(--cyber-ink) !important;
+  background: var(--cyber-panel-deep) !important;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.boxphone-theme :is(button, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--cyber-cyan);
+  outline-offset: 3px;
+}
+.boxphone-theme input::placeholder,
+.boxphone-theme textarea::placeholder {
+  color: var(--cyber-muted);
+}
+.boxphone-theme p,
+.boxphone-theme label.field,
+.boxphone-theme .muted,
+.boxphone-theme small {
+  color: var(--cyber-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.boxphone-theme .badge {
+  padding: 4px 7px;
+  border: 1px solid var(--cyber-lime);
+  border-radius: 0;
+  color: var(--cyber-lime);
+  background: #253b30;
+  font-size: 10px;
+  font-weight: 700;
+}
+.boxphone-theme .badge.live {
+  border-color: #ff769e;
+  color: #ff98b7;
+  background: #48253e;
+  animation: none;
+}
+.boxphone-theme .notice {
+  border: 1px solid var(--cyber-cyan);
+  border-radius: 0;
+  color: #d7ceed;
+  background: var(--cyber-panel-deep);
+  font-size: 11px;
+}
+.boxphone-theme .notice.warn {
+  border-color: var(--cyber-yellow);
+  color: var(--cyber-yellow);
+  background: #40362f;
+}
+.boxphone-theme .device,
+.boxphone-theme .question,
+.boxphone-theme td,
+.boxphone-theme th {
+  border-color: #66518c;
+  font-size: 11px;
+}
+.boxphone-theme .device-num {
+  border-color: var(--cyber-purple-light);
+  border-radius: 0;
+  color: var(--cyber-cyan);
+  background: #30294f;
+}
+.boxphone-theme .stats {
+  color: var(--cyber-cyan);
+  font-size: 29px;
+}
+.boxphone-theme .queue-wrap {
+  border: 1px solid #66518c;
+  border-radius: 0;
+  background: var(--cyber-panel-deep);
+}
+.boxphone-theme th {
+  color: var(--cyber-cyan);
+  background: #2d2748;
+}
+.boxphone-theme dialog {
+  border: 3px solid var(--cyber-cyan);
+  border-radius: 0;
+  color: var(--cyber-ink);
+  background: var(--cyber-sidebar-bg);
+  box-shadow: 8px 8px 0 #060510;
+}
+.boxphone-theme .slider {
+  border: 1px solid var(--cyber-purple-light);
+  border-radius: 0;
+  background: var(--cyber-panel-deep);
+}
+.boxphone-theme .slider::before {
+  border-radius: 0;
+  background: var(--cyber-ink);
+}
+.boxphone-theme .switch input:checked + .slider {
+  background: var(--cyber-pink);
+}
+.boxphone-theme input[type='checkbox'] {
+  accent-color: var(--cyber-pink);
+}
+.boxphone-theme #status {
+  padding: 12px 20px;
+  border-top: 2px solid var(--cyber-purple);
+  color: var(--cyber-muted);
+  background: var(--cyber-sidebar-bg);
+  font-size: 11px;
+}
+.boxphone-theme #status.error,
+.boxphone-theme #status.live-active {
+  border-color: var(--cyber-pink);
+  color: #ffb3ca;
+  background: #48253e;
+}
+.boxphone-theme #drafts > div,
+.boxphone-theme #perDevicePanel hr {
+  border-color: #66518c !important;
+}
+.boxphone-theme .devices {
+  max-height: 520px;
+}
+.boxphone-theme .device {
+  gap: 10px;
+  padding: 14px 0;
+  align-items: center;
+}
+.boxphone-theme .device-num {
+  display: inline-block;
+  min-width: 48px;
+  color: var(--cyber-cyan);
+  font-size: 18px;
+  font-weight: 700;
+  margin-right: 8px;
+}
+.boxphone-theme .device small {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--cyber-muted);
+}
+.boxphone-theme #screenDialog {
+  width: min(620px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+}
+.boxphone-theme #screenTitle {
+  font-size: 20px;
+  color: var(--cyber-cyan);
+  flex: 1;
+}
+.boxphone-theme #screenIdentity {
+  overflow-wrap: anywhere;
+}
+.boxphone-theme #deviceNickname {
+  flex: 1;
+  min-width: 150px;
+}
+.boxphone-theme #screen {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 60vh;
+  margin: 18px auto 0;
+  object-fit: contain;
+}
+.boxphone-theme #screen:not([src]) {
+  display: none;
+}
+.boxphone-theme .library-source > select {
+  width: 100%;
+  margin-bottom: 12px;
+}
+.boxphone-theme #libraryVideo {
+  flex: 1;
+  min-width: 180px;
+}
+.boxphone-theme #librarySource .row,
+.boxphone-theme #livehubRouting > .row {
+  margin-top: 12px;
+}
+.boxphone-theme #librarySource input,
+.boxphone-theme #livehubRouting input {
+  width: 85px;
+}
+.boxphone-theme #libraryPreview {
+  width: 100%;
+  max-height: 250px;
+  margin-top: 12px;
+  background: #0b0a1a;
+}
+.boxphone-theme .device-target {
+  padding: 14px 0;
+  border-bottom: 1px solid #66518c;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+.boxphone-theme .device-target > strong {
+  grid-column: 1/-1;
+  color: var(--cyber-cyan);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.boxphone-theme .device-target > select,
+.boxphone-theme .device-target > p {
+  grid-column: 1/-1;
+  width: 100%;
+  margin: 0;
+}
+.boxphone-theme .device-target > a {
+  align-self: center;
+  color: var(--cyber-cyan);
+  text-align: right;
+}
+.boxphone-theme {
+  scrollbar-color: #7655c5 #1d1c35;
+}
+@media (max-width: 900px) {
+  .boxphone-theme .layout {
+    grid-template-columns: 1fr;
+    padding: 16px 12px;
+  }
+  .boxphone-theme .devices {
+    max-height: 240px;
+  }
+  .boxphone-theme .two {
+    grid-template-columns: 1fr;
+  }
+  .boxphone-theme header {
+    padding: 14px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boxphone-theme button,
+  .boxphone-theme .slider {
+    transition: none;
+  }
+}
