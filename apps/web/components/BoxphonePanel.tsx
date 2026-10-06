@@ -27,6 +27,12 @@ export default function BoxphonePanel() {
       active = false;
     };
   }, [version]);
+  // Keep looking while the computer holding the phones is not connected yet.
+  useEffect(() => {
+    if (ready) return;
+    const timer = setInterval(() => setVersion((v) => v + 1), 10000);
+    return () => clearInterval(timer);
+  }, [ready]);
   return (
     <section className="boxphone-panel">
       <div className="boxphone-heading">
@@ -50,8 +56,9 @@ export default function BoxphonePanel() {
       ) : (
         <div className="ai-settings-card">
           <p>
-            เปิดไฟล์ <strong>Start-Boxphone.cmd</strong> ในโฟลเดอร์ Live Hub บนเครื่องที่ต่อมือถือ
-            แล้วกดตรวจการเชื่อมต่ออีกครั้ง
+            ตัวเชื่อม Boxphone จะเริ่มเองเมื่อคอมที่ต่อมือถือเปิดและล็อกอิน Windows
+            หน้านี้ตรวจซ้ำให้อัตโนมัติทุก 10 วินาที ถ้ายังไม่เชื่อมต่อ ให้เปิดไฟล์{' '}
+            <strong>Start-Boxphone.cmd</strong> ในโฟลเดอร์ Live Hub บนคอมเครื่องนั้นหนึ่งครั้ง
           </p>
           <p>
             ต้องเปิดหน้าควบคุมนี้ไว้ระหว่างฟังเสียงหรือเดินคิว เมื่อออกจากหน้า

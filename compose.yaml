@@ -79,6 +79,8 @@ services:
       BOXPHONE_ENABLED: ${BOXPHONE_ENABLED:-false}
       BOXPHONE_INTERNAL_URL: http://host.docker.internal:8767
       BOXPHONE_BRIDGE_TOKEN: ${BOXPHONE_BRIDGE_TOKEN:-}
+      BOXPHONE_REMOTE: ${BOXPHONE_REMOTE:-}
+      BOXPHONE_AGENT_TOKEN: ${BOXPHONE_AGENT_TOKEN:-}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Run npm run setup:local first}
     ports: ['127.0.0.1:3100:3100']
     depends_on:

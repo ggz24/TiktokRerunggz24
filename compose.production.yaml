@@ -97,6 +97,10 @@ services:
       PUBLIC_BASE_URL: https://${DOMAIN:?Set DOMAIN in .env.production}
       API_INTERNAL_URL: http://api:4000
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN in .env.production}
+      # Boxphone: the computer that holds the phones connects OUT with this token (empty = feature off).
+      BOXPHONE_ENABLED: ${BOXPHONE_ENABLED:-false}
+      BOXPHONE_REMOTE: ${BOXPHONE_REMOTE:-}
+      BOXPHONE_AGENT_TOKEN: ${BOXPHONE_AGENT_TOKEN:-}
     depends_on:
       api: { condition: service_healthy }
     healthcheck:

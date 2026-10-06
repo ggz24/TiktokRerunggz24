@@ -5,6 +5,7 @@ import { currentUser } from '@/lib/auth';
 import { isSameOrigin } from '@/lib/origin';
 import { apiPath } from '@/lib/base-path';
 import { BoxphoneError, boxphoneAudio, boxphoneCatalog, boxphoneTarget } from '@/lib/boxphone';
+import { RelayError, agentOnline, submitJob } from '@/lib/boxphone-relay';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -107,12 +108,21 @@ async function proxy(request: Request, context: Context) {
     !(request.method === 'POST' && actions.has(action))
   )
     return error('ไม่พบคำสั่ง', 404);
+  // Hosted mode: the computer holding the phones connects out to this service (see boxphone-relay).
+  const remote = process.env.BOXPHONE_REMOTE === 'agent';
   const token = process.env.BOXPHONE_BRIDGE_TOKEN;
-  if (!token) return error('ยังไม่ได้ตั้งค่าตัวเชื่อม Boxphone', 503);
+  if (!remote && !token) return error('ยังไม่ได้ตั้งค่าตัวเชื่อม Boxphone', 503);
   const base = process.env.BOXPHONE_INTERNAL_URL || 'http://127.0.0.1:8767';
-  // This feature is local only. Never forward keys or device commands to arbitrary URLs.
-  if (!['http://127.0.0.1:8767', 'http://host.docker.internal:8767'].includes(base))
+  // Local mode only: never forward keys or device commands to arbitrary URLs.
+  if (!remote && !['http://127.0.0.1:8767', 'http://host.docker.internal:8767'].includes(base))
     return error('ปลายทาง Boxphone ต้องเป็นบริการในเครื่องนี้', 503);
+  if (remote && request.method === 'GET' && action === 'health')
+    return agentOnline()
+      ? NextResponse.json({ app: 'boxphone-lab', mode: 'agent' }, { headers })
+      : error(
+          'คอมที่ต่อโทรศัพท์ยังไม่เชื่อมต่อ ตรวจว่าเปิดเครื่องอยู่และตัวเชื่อม Boxphone ทำงานอยู่',
+          503,
+        );
   let body: Uint8Array | undefined;
   let data: Record<string, unknown> = {};
   if (request.method === 'POST') {
@@ -184,35 +194,59 @@ async function proxy(request: Request, context: Context) {
         }),
       );
     }
-    const r = await fetch(
-      `${base}/${bridgeAction === 'health' ? 'health' : 'api/' + bridgeAction}`,
-      {
-        method: request.method,
-        headers: {
-          'content-type': 'application/json',
-          'x-boxphone-bridge-token': token,
-          'x-lab-token': token,
-          'x-livehub-owner': username,
+    let status: number;
+    let result: Record<string, unknown>;
+    if (remote) {
+      const relayed = await submitJob({
+        action: bridgeAction,
+        method: request.method === 'GET' ? 'GET' : 'POST',
+        owner: username,
+        body: body ? Buffer.from(body).toString('utf8') : null,
+      });
+      status = relayed.status;
+      try {
+        const parsed: unknown = JSON.parse(relayed.body);
+        result =
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : {};
+      } catch {
+        return error('ตัวเชื่อมบนคอมตอบกลับไม่ถูกต้อง', 502);
+      }
+    } else {
+      const r = await fetch(
+        `${base}/${bridgeAction === 'health' ? 'health' : 'api/' + bridgeAction}`,
+        {
+          method: request.method,
+          headers: {
+            'content-type': 'application/json',
+            'x-boxphone-bridge-token': token as string,
+            'x-lab-token': token as string,
+            'x-livehub-owner': username,
+          },
+          body: body as BodyInit | undefined,
+          cache: 'no-store',
+          redirect: 'error',
+          signal: AbortSignal.timeout(125000),
         },
-        body: body as BodyInit | undefined,
-        cache: 'no-store',
-        redirect: 'error',
-        signal: AbortSignal.timeout(125000),
-      },
-    );
-    const result = await r.json();
-    if (r.ok && audioMeta && action === 'channel-transcript') {
+      );
+      status = r.status;
+      result = await r.json();
+    }
+    const ok = status >= 200 && status < 300;
+    if (ok && audioMeta && action === 'channel-transcript') {
       await boxphoneTarget(username, data.accountId, (audioMeta.target as { key: string }).key);
     }
     return NextResponse.json(
       {
         ...result,
-        ...(r.ok ? audioMeta : {}),
-        ...(r.ok && forwardTarget ? { target: forwardTarget } : {}),
+        ...(ok ? audioMeta : {}),
+        ...(ok && forwardTarget ? { target: forwardTarget } : {}),
       },
-      { status: r.status, headers },
+      { status, headers },
     );
   } catch (e) {
+    if (e instanceof RelayError) return error(e.message, e.status);
     if (e instanceof BoxphoneError) return error(e.message, e.status);
     return error('เชื่อมต่อ Boxphone ไม่สำเร็จ เปิด Start-Boxphone.cmd บนเครื่องที่ต่อมือถือ', 503);
   }
