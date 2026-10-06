@@ -24,6 +24,8 @@ import type { CommentReplyService } from './ai-comments.js';
 import { registerAiCommentRoutes } from './ai-comment-routes.js';
 import type { ChatBridge } from './chat-bridge.js';
 import { registerChatBridgeRoutes } from './chat-bridge-routes.js';
+import type { BoxphoneService } from './boxphone.js';
+import { registerBoxphoneRoutes } from './boxphone-routes.js';
 
 const require = createRequire(import.meta.url);
 const { createMockEvent, validateEvent } =
@@ -54,6 +56,7 @@ export function createApp(
   autoLive?: AutoLiveManager,
   commentReplies?: CommentReplyService,
   chatBridge?: ChatBridge,
+  boxphone?: BoxphoneService,
 ) {
   if (accountConfig) validateAccountConfig(accountConfig);
   const app = Fastify({ logger: false, requestTimeout: 3_600_000 });
@@ -89,6 +92,14 @@ export function createApp(
       chatBridge,
       ownerFromHeaders,
       async (owner, id) => !!(await accountConfig.store.findEncrypted(owner, id)),
+    );
+
+  if (boxphone && accountConfig && liveService)
+    registerBoxphoneRoutes(app, boxphone, liveService, ownerFromHeaders, (headers) =>
+      tokenMatches(
+        headers['x-internal-token'] as string | string[] | undefined,
+        accountConfig.internalToken,
+      ),
     );
 
   app.get('/health/live', async () => ({ status: 'alive', service: 'api' }));

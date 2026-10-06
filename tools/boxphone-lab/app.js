@@ -265,7 +265,11 @@ function renderDevices() {
     const label = document.createElement('label');
     label.append(tagBadge, document.createTextNode(tags[d.serial] || d.xiaoweiName || d.model));
     const sub = document.createElement('small');
-    sub.textContent = d.model + ' · ' + (d.state === 'device' ? 'เชื่อมต่อแล้ว' : d.state);
+    sub.textContent =
+      d.model +
+      ' · ' +
+      (d.state === 'device' ? 'เชื่อมต่อแล้ว' : d.state) +
+      (d.computerName ? ' · คอม ' + d.computerName : '');
     label.append(sub);
     const serialLabel = document.createElement('small');
     serialLabel.textContent = d.serial;

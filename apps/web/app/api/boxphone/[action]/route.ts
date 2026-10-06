@@ -4,8 +4,14 @@ import { NextResponse } from 'next/server';
 import { currentUser } from '@/lib/auth';
 import { isSameOrigin } from '@/lib/origin';
 import { apiPath } from '@/lib/base-path';
-import { BoxphoneError, boxphoneAudio, boxphoneCatalog, boxphoneTarget } from '@/lib/boxphone';
-import { RelayError, agentOnline, submitJob } from '@/lib/boxphone-relay';
+import { BoxphoneError, boxphoneApi, boxphoneCatalog, boxphoneTarget } from '@/lib/boxphone';
+import {
+  RelayError,
+  dropAgent,
+  listDevices,
+  onlineAgents,
+  submitForSerial,
+} from '@/lib/boxphone-relay';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -28,6 +34,27 @@ const actions = new Set([
   'transcribe-video',
   'channel-transcript',
 ]);
+// These run on the server with keys saved there, so they work from any computer.
+const aiActions = new Set([
+  'ai-settings',
+  'transcribe',
+  'questions',
+  'plan-questions',
+  'transcribe-video',
+  'channel-transcript',
+]);
+/** One double-clickable file: batch lines first, then the PowerShell script after a marker. */
+function installerCmd(script: string): string {
+  return [
+    '@echo off',
+    `powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content -LiteralPath '%~f0' -Raw -Encoding UTF8) -split ('#--P'+'S--'))[1]"`,
+    'echo.',
+    'pause',
+    'exit /b',
+    '#--PS--',
+    script,
+  ].join('\r\n');
+}
 const assets = new Set([
   'app.js',
   'continuous.mjs',
@@ -103,26 +130,115 @@ async function proxy(request: Request, context: Context) {
       return error('โหลดคลังวิดีโอและช่องไม่สำเร็จ', 503);
     }
   }
+  // Hosted mode: the computers holding the phones connect out to this service (see boxphone-relay).
+  const remote = process.env.BOXPHONE_REMOTE === 'agent';
+
+  // --- computers: list, pair, remove, installer ---
+  if (request.method === 'GET' && action === 'computers') {
+    if (!remote) return NextResponse.json({ mode: 'local', computers: [] }, { headers });
+    try {
+      const { data } = await boxphoneApi(username, 'GET', '/api/v1/boxphone/agents');
+      const online = new Map(onlineAgents(username).map((a) => [a.id, a]));
+      const saved = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
+      const computers = saved.map((c) => ({
+        id: String(c.id),
+        name: String(c.name),
+        online: online.has(String(c.id)),
+        lastSeen:
+          online.get(String(c.id))?.lastSeen ??
+          (c.lastSeen ? Date.parse(String(c.lastSeen)) : null),
+      }));
+      const legacy = online.get('legacy');
+      if (legacy)
+        computers.unshift({
+          id: 'legacy',
+          name: legacy.name,
+          online: true,
+          lastSeen: legacy.lastSeen,
+        });
+      return NextResponse.json({ mode: 'agent', computers }, { headers });
+    } catch {
+      return error('โหลดรายการคอมไม่สำเร็จ', 503);
+    }
+  }
+  if (request.method === 'POST' && action === 'pair') {
+    if (!remote) return error('โหมดนี้ใช้ตัวเชื่อมในเครื่องโดยตรง ไม่ต้องจับคู่คอม', 409);
+    try {
+      const { status, data } = await boxphoneApi(username, 'POST', '/api/v1/boxphone/pairings', {});
+      return NextResponse.json(data, { status, headers });
+    } catch (e) {
+      return error(e instanceof BoxphoneError ? e.message : 'สร้างรหัสจับคู่ไม่สำเร็จ', 503);
+    }
+  }
+  if (request.method === 'POST' && action === 'computer-remove') {
+    if (!remote) return error('ไม่พบคำสั่ง', 404);
+    const body: unknown = await request.json().catch(() => null);
+    const id = body && typeof body === 'object' ? (body as { id?: unknown }).id : undefined;
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))
+      return error('ลบได้เฉพาะคอมที่จับคู่ด้วยรหัส (คอมเครื่องหลักแบบเดิมลบจากหน้านี้ไม่ได้)', 400);
+    try {
+      const { status, data } = await boxphoneApi(
+        username,
+        'DELETE',
+        `/api/v1/boxphone/agents/${id}`,
+      );
+      if (status === 200) dropAgent(id);
+      return NextResponse.json(data, { status, headers });
+    } catch (e) {
+      return error(e instanceof BoxphoneError ? e.message : 'ลบคอมไม่สำเร็จ', 503);
+    }
+  }
+  if (request.method === 'GET' && action === 'installer') {
+    if (!remote) return error('โหมดนี้ไม่ต้องติดตั้งตัวแทน', 409);
+    const code = new URL(request.url).searchParams.get('code') ?? '';
+    if (!/^[A-Za-z0-9-]{8,12}$/.test(code)) return error('รหัสจับคู่ไม่ถูกต้อง', 400);
+    try {
+      const script = await readFile(source('installer/setup.ps1'), 'utf8');
+      const origin = (process.env.PUBLIC_BASE_URL || new URL(request.url).origin).replace(
+        /\/$/,
+        '',
+      );
+      const server = `${origin}${apiPath('')}`;
+      return new Response(
+        installerCmd(script.replace('__SERVER__', server).replace('__CODE__', code)),
+        {
+          headers: {
+            ...headers,
+            'Content-Type': 'application/octet-stream',
+            'Content-Disposition': 'attachment; filename="Boxphone-Setup.cmd"',
+          },
+        },
+      );
+    } catch {
+      return error('สร้างตัวติดตั้งไม่สำเร็จ', 503);
+    }
+  }
+
   if (
     !(request.method === 'GET' && action === 'health') &&
     !(request.method === 'POST' && actions.has(action))
   )
     return error('ไม่พบคำสั่ง', 404);
-  // Hosted mode: the computer holding the phones connects out to this service (see boxphone-relay).
-  const remote = process.env.BOXPHONE_REMOTE === 'agent';
   const token = process.env.BOXPHONE_BRIDGE_TOKEN;
-  if (!remote && !token) return error('ยังไม่ได้ตั้งค่าตัวเชื่อม Boxphone', 503);
   const base = process.env.BOXPHONE_INTERNAL_URL || 'http://127.0.0.1:8767';
-  // Local mode only: never forward keys or device commands to arbitrary URLs.
-  if (!remote && !['http://127.0.0.1:8767', 'http://host.docker.internal:8767'].includes(base))
+  const needsBridge = !aiActions.has(action);
+  if (!remote && needsBridge && !token) return error('ยังไม่ได้ตั้งค่าตัวเชื่อม Boxphone', 503);
+  // Local mode only: never forward device commands to arbitrary URLs.
+  if (
+    !remote &&
+    needsBridge &&
+    !['http://127.0.0.1:8767', 'http://host.docker.internal:8767'].includes(base)
+  )
     return error('ปลายทาง Boxphone ต้องเป็นบริการในเครื่องนี้', 503);
-  if (remote && request.method === 'GET' && action === 'health')
-    return agentOnline()
-      ? NextResponse.json({ app: 'boxphone-lab', mode: 'agent' }, { headers })
+  if (remote && request.method === 'GET' && action === 'health') {
+    const computers = onlineAgents(username).length;
+    return computers > 0
+      ? NextResponse.json({ app: 'boxphone-lab', mode: 'agent', computers }, { headers })
       : error(
           'คอมที่ต่อโทรศัพท์ยังไม่เชื่อมต่อ ตรวจว่าเปิดเครื่องอยู่และตัวเชื่อม Boxphone ทำงานอยู่',
           503,
         );
+  }
   let body: Uint8Array | undefined;
   let data: Record<string, unknown> = {};
   if (request.method === 'POST') {
@@ -160,8 +276,50 @@ async function proxy(request: Request, context: Context) {
     }
   }
   try {
-    let bridgeAction = action;
-    let audioMeta: Record<string, unknown> | undefined;
+    // --- AI runs on the server with keys saved there, so any computer works without setup ---
+    if (aiActions.has(action)) {
+      if (action === 'channel-transcript') {
+        const target = await boxphoneTarget(username, data.accountId);
+        const { status, data: heard } = await boxphoneApi(
+          username,
+          'POST',
+          '/api/v1/boxphone/transcribe-video',
+          {
+            accountId: data.accountId,
+            seconds: data.seconds,
+            transcriptionKey: data.transcriptionKey,
+          },
+        );
+        if (status === 200) await boxphoneTarget(username, data.accountId, target.key);
+        return NextResponse.json(status === 200 ? { ...heard, target } : heard, {
+          status,
+          headers,
+        });
+      }
+      if (action === 'transcribe-video') {
+        const { status, data: heard } = await boxphoneApi(
+          username,
+          'POST',
+          '/api/v1/boxphone/transcribe-video',
+          {
+            videoId: data.videoId,
+            startSeconds: data.startSeconds ?? 0,
+            seconds: data.seconds ?? 30,
+            transcriptionKey: data.transcriptionKey,
+          },
+        );
+        if (status === 200) delete heard.target;
+        return NextResponse.json(heard, { status, headers });
+      }
+      const { status, data: result } = await boxphoneApi(
+        username,
+        'POST',
+        `/api/v1/boxphone/${action}`,
+        data,
+      );
+      return NextResponse.json(result, { status, headers });
+    }
+
     let forwardTarget: Awaited<ReturnType<typeof boxphoneTarget>> | undefined;
     if (action === 'send' || action === 'open-live' || action === 'check-live') {
       // The target URL/handle comes from an owned verified account, never from browser input.
@@ -170,37 +328,21 @@ async function proxy(request: Request, context: Context) {
       data = { ...data, target };
       body = Buffer.from(JSON.stringify(data));
     }
-    if (action === 'transcribe-video' || action === 'channel-transcript') {
-      if (action === 'channel-transcript') {
-        const target = await boxphoneTarget(username, data.accountId);
-        audioMeta = { target };
-      }
-      const audio = await boxphoneAudio(username, data);
-      audioMeta = {
-        ...audioMeta,
-        videoId: audio.videoId,
-        videoName: audio.videoName,
-        startSeconds: audio.startSeconds,
-        durationSeconds: audio.durationSeconds,
-        seconds: audio.seconds,
-      };
-      bridgeAction = 'transcribe';
-      body = Buffer.from(
-        JSON.stringify({
-          transcriptionKey: data.transcriptionKey,
-          audio: audio.audio,
-          name: audio.name,
-          mime: audio.mime,
-        }),
-      );
-    }
     let status: number;
     let result: Record<string, unknown>;
     if (remote) {
-      const relayed = await submitJob({
-        action: bridgeAction,
-        method: request.method === 'GET' ? 'GET' : 'POST',
-        owner: username,
+      if (action === 'devices') {
+        const listed = await listDevices(username);
+        return NextResponse.json(
+          { devices: listed.devices, computers: listed.computers },
+          { headers },
+        );
+      }
+      const serial = typeof data.serial === 'string' ? data.serial : '';
+      if (!serial) return error('ไม่ได้ระบุโทรศัพท์', 400);
+      const relayed = await submitForSerial(username, serial, {
+        action,
+        method: 'POST',
         body: body ? Buffer.from(body).toString('utf8') : null,
       });
       status = relayed.status;
@@ -214,35 +356,25 @@ async function proxy(request: Request, context: Context) {
         return error('ตัวเชื่อมบนคอมตอบกลับไม่ถูกต้อง', 502);
       }
     } else {
-      const r = await fetch(
-        `${base}/${bridgeAction === 'health' ? 'health' : 'api/' + bridgeAction}`,
-        {
-          method: request.method,
-          headers: {
-            'content-type': 'application/json',
-            'x-boxphone-bridge-token': token as string,
-            'x-lab-token': token as string,
-            'x-livehub-owner': username,
-          },
-          body: body as BodyInit | undefined,
-          cache: 'no-store',
-          redirect: 'error',
-          signal: AbortSignal.timeout(125000),
+      const r = await fetch(`${base}/${action === 'health' ? 'health' : 'api/' + action}`, {
+        method: request.method,
+        headers: {
+          'content-type': 'application/json',
+          'x-boxphone-bridge-token': token as string,
+          'x-lab-token': token as string,
+          'x-livehub-owner': username,
         },
-      );
+        body: body as BodyInit | undefined,
+        cache: 'no-store',
+        redirect: 'error',
+        signal: AbortSignal.timeout(125000),
+      });
       status = r.status;
       result = await r.json();
     }
     const ok = status >= 200 && status < 300;
-    if (ok && audioMeta && action === 'channel-transcript') {
-      await boxphoneTarget(username, data.accountId, (audioMeta.target as { key: string }).key);
-    }
     return NextResponse.json(
-      {
-        ...result,
-        ...(ok ? audioMeta : {}),
-        ...(ok && forwardTarget ? { target: forwardTarget } : {}),
-      },
+      { ...result, ...(ok && forwardTarget ? { target: forwardTarget } : {}) },
       { status, headers },
     );
   } catch (e) {

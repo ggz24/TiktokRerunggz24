@@ -2865,3 +2865,42 @@
     flex-direction: column;
   }
 }
+
+.boxphone-computers {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line, #5b3fa0);
+  background: rgba(20, 14, 40, 0.6);
+}
+.boxphone-computers summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.boxphone-computers ul {
+  margin: 8px 0;
+  padding-left: 0;
+  list-style: none;
+}
+.boxphone-computers li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.boxphone-on {
+  color: #7dffb0;
+}
+.boxphone-off {
+  color: #ff7a9c;
+}
+.boxphone-pair ol {
+  margin: 10px 0 10px 18px;
+  line-height: 1.8;
+}
+.boxphone-code {
+  font-size: 2rem;
+  letter-spacing: 0.25em;
+  font-weight: 800;
+  margin: 6px 0 12px;
+}

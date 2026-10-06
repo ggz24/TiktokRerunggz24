@@ -10,6 +10,7 @@ import { defaultConvertVideo, LiveService } from './live-service.js';
 import { AutoLiveManager, ensureAutoLiveTable } from './auto-live.js';
 import { SessionChat, ensureSessionChatTables } from './session-chat.js';
 import { ChatBridge } from './chat-bridge.js';
+import { BoxphoneService, createPgBoxphoneStore, ensureBoxphoneTables } from './boxphone.js';
 import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
 import {
   CommentReplyService,
@@ -53,6 +54,7 @@ let liveService: LiveService | undefined;
 let autoLive: AutoLiveManager | undefined;
 let commentReplies: CommentReplyService | undefined;
 let chatBridge: ChatBridge | undefined;
+let boxphone: BoxphoneService | undefined;
 let serverChat: SessionChat | undefined;
 let chatTimer: ReturnType<typeof setInterval> | undefined;
 if (accountConfig) {
@@ -61,6 +63,8 @@ if (accountConfig) {
   await ensureAutoLiveTable(pool);
   await ensureProductSetTable(pool);
   await ensureCommentReplyTables(pool);
+  await ensureBoxphoneTables(pool);
+  boxphone = new BoxphoneService(createPgBoxphoneStore(pool, accountConfig.encryptionKey));
   await ensureSessionChatTables(pool);
   const rapidApiKey = process.env.RAPIDAPI_KEY?.trim();
   const autoRoomCreator = rapidApiKey
@@ -229,6 +233,7 @@ const app = createApp(
   autoLive,
   commentReplies,
   chatBridge,
+  boxphone,
 );
 
 async function shutdown() {

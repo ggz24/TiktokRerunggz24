@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Readable } from 'node:stream';
 import { LiveError, LiveService } from './live-service.js';
 import type { AutoLiveManager } from './auto-live.js';
-import { extractBoxphoneAudio } from './boxphone-audio.js';
+import { resolveBoxphoneAudio } from './boxphone-audio.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -57,55 +57,9 @@ export function registerLiveRoutes(
       seconds?: unknown;
     };
     try {
-      let videoId = body.videoId;
-      let start = body.startSeconds ?? 0;
-      const requestedSeconds = body.seconds ?? 30;
-      if (
-        typeof requestedSeconds !== 'number' ||
-        !Number.isFinite(requestedSeconds) ||
-        requestedSeconds < 5 ||
-        requestedSeconds > 60
-      )
-        throw new LiveError(400, 'Invalid audio segment.');
-      let seconds = requestedSeconds;
-      let target: {
-        accountId: string;
-        startedAt: string;
-        videoId: string;
-        roomId: string | null;
-      } | null = null;
-      if (body.accountId !== undefined) {
-        if (typeof body.accountId !== 'string' || !uuidPattern.test(body.accountId))
-          throw new LiveError(400, 'Invalid account ID.');
-        const session = await service.session(ownerId, body.accountId);
-        if (session.status !== 'live' || !session.videoId || !session.startedAt)
-          throw new LiveError(409, 'The selected channel is not streaming.');
-        videoId = session.videoId;
-        // Use the recent played segment, not audio from a future part of the rerun.
-        const played = (Date.now() - Date.parse(session.startedAt)) / 1000 - 8;
-        if (!Number.isFinite(played) || played < 5)
-          throw new LiveError(409, 'Waiting for the first played audio segment.');
-        seconds = Math.min(seconds, played);
-        start = Math.max(0, played - seconds);
-        target = {
-          accountId: body.accountId,
-          startedAt: session.startedAt,
-          videoId: session.videoId,
-          roomId: await service.currentRoomId(ownerId, body.accountId),
-        };
-      }
-      if (
-        typeof videoId !== 'string' ||
-        !uuidPattern.test(videoId) ||
-        typeof start !== 'number' ||
-        typeof seconds !== 'number'
-      )
-        throw new LiveError(400, 'Invalid video segment.');
-      // Resolve ownership/readiness before launching any media process.
-      const file = await service.videoFile(ownerId, videoId);
-      const audio = await extractBoxphoneAudio(file.path, start, seconds, !!target);
+      const resolved = await resolveBoxphoneAudio(service, ownerId, body);
       reply.header('Cache-Control', 'no-store');
-      return { ...audio, videoId, videoName: file.name, target };
+      return resolved;
     } catch (error) {
       return failure(reply, error);
     }

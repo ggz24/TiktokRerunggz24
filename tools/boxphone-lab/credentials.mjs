@@ -9,10 +9,41 @@ export function installCredentials(ctx) {
     hasTranscriptionKey: false,
     hasOpenaiKey: false,
     hasOpenrouterKey: false,
+    backupCounts: { transcriptionKey: 0, openaiKey: 0, openrouterKey: 0 },
     questionModels: { openai: 'gpt-4o-mini', openrouter: 'openai/gpt-4o-mini' },
   };
   const hasQuestion = () =>
     saved[activeProvider === 'openrouter' ? 'hasOpenrouterKey' : 'hasOpenaiKey'];
+  const questionField = () => (activeProvider === 'openrouter' ? 'openrouterKey' : 'openaiKey');
+  const backupCount = (field) => saved.backupCounts?.[field] ?? 0;
+  // Backup keys: one per line, tried in order when the main key is rejected (wrong, out of quota, rate limited).
+  function addBackupBox(afterId, id, label) {
+    const box = document.createElement('textarea');
+    box.id = id;
+    box.rows = 2;
+    box.autocomplete = 'off';
+    box.spellcheck = false;
+    box.placeholder = label;
+    box.style.cssText =
+      'width:100%;margin-top:6px;-webkit-text-security:disc;text-security:disc;font-family:monospace';
+    $(afterId).closest('.row').after(box);
+    return box;
+  }
+  addBackupBox(
+    'transcriptionKey',
+    'transcriptionBackups',
+    'คีย์สำรองถอดเสียง (ไม่บังคับ) บรรทัดละ 1 คีย์ สูงสุด 3 · ใช้เองเมื่อคีย์หลักใช้ไม่ได้',
+  );
+  addBackupBox(
+    'questionKey',
+    'questionBackups',
+    'คีย์สำรองสร้างคำถาม (ไม่บังคับ) บรรทัดละ 1 คีย์ สูงสุด 3 · ใช้เองเมื่อคีย์หลักใช้ไม่ได้',
+  );
+  const lines = (id) =>
+    $(id)
+      .value.split(/\r?\n/)
+      .map((x) => x.trim())
+      .filter(Boolean);
   function render() {
     $('transcriptionKey').placeholder = saved.hasTranscriptionKey
       ? 'บันทึกแล้ว · เว้นว่างเพื่อใช้คีย์เดิม'
@@ -31,24 +62,31 @@ export function installCredentials(ctx) {
       ? 'กำลังโหลดคีย์ที่บันทึกไว้…'
       : !integrated
         ? 'เปิดผ่าน Live Hub เพื่อบันทึกคีย์'
-        : `คีย์ถอดเสียง: ${saved.hasTranscriptionKey ? 'บันทึกแล้ว' : 'ยังไม่บันทึก'} · คีย์ ${activeProvider === 'openrouter' ? 'OpenRouter' : 'OpenAI'}: ${hasQuestion() ? 'บันทึกแล้ว' : 'ยังไม่บันทึก'}`;
+        : `คีย์ถอดเสียง: ${saved.hasTranscriptionKey ? 'บันทึกแล้ว' : 'ยังไม่บันทึก'} (สำรอง ${backupCount('transcriptionKey')}) · คีย์ ${activeProvider === 'openrouter' ? 'OpenRouter' : 'OpenAI'}: ${hasQuestion() ? 'บันทึกแล้ว' : 'ยังไม่บันทึก'} (สำรอง ${backupCount(questionField())})`;
   }
   function capture() {
     const transcriptionKey = $('transcriptionKey').value.trim(),
       questionKey = $('questionKey').value.trim(),
+      transcriptionBackups = lines('transcriptionBackups'),
+      questionBackups = lines('questionBackups'),
       model = $('questionModel').value.trim();
+    const backupKeys = {
+      ...(transcriptionBackups.length ? { transcriptionKey: transcriptionBackups } : {}),
+      ...(questionBackups.length ? { [questionField()]: questionBackups } : {}),
+    };
     return {
       provider: activeProvider,
       transcriptionKey,
       questionKey,
+      transcriptionBackups: transcriptionBackups.join('\n'),
+      questionBackups: questionBackups.join('\n'),
       data: {
         operation: 'save',
         questionProvider: activeProvider,
         questionModels: { [activeProvider]: model },
         ...(transcriptionKey ? { transcriptionKey } : {}),
-        ...(questionKey
-          ? { [activeProvider === 'openrouter' ? 'openrouterKey' : 'openaiKey']: questionKey }
-          : {}),
+        ...(questionKey ? { [questionField()]: questionKey } : {}),
+        ...(Object.keys(backupKeys).length ? { backupKeys } : {}),
       },
     };
   }
@@ -65,6 +103,10 @@ export function installCredentials(ctx) {
       saved = metadata;
       if ($('transcriptionKey').value.trim() === snapshot.transcriptionKey)
         $('transcriptionKey').value = '';
+      if (lines('transcriptionBackups').join('\n') === snapshot.transcriptionBackups)
+        $('transcriptionBackups').value = '';
+      if (lines('questionBackups').join('\n') === snapshot.questionBackups)
+        $('questionBackups').value = '';
       if (
         activeProvider === snapshot.provider &&
         $('questionKey').value.trim() === snapshot.questionKey
@@ -89,7 +131,13 @@ export function installCredentials(ctx) {
     await ready;
     await saveSnapshot(capture());
   });
-  for (const id of ['transcriptionKey', 'questionKey', 'questionModel'])
+  for (const id of [
+    'transcriptionKey',
+    'questionKey',
+    'questionModel',
+    'transcriptionBackups',
+    'questionBackups',
+  ])
     $(id).addEventListener(
       'change',
       run(async () => {
@@ -118,6 +166,8 @@ export function installCredentials(ctx) {
     if (integrated) saved = await enqueue(() => ctx.api('ai-settings', { operation: 'delete' }));
     $('transcriptionKey').value = '';
     $('questionKey').value = '';
+    $('transcriptionBackups').value = '';
+    $('questionBackups').value = '';
     render();
     ctx.status('ลบคีย์ที่บันทึกไว้และหยุดงานอัตโนมัติแล้ว');
   }
@@ -131,6 +181,8 @@ export function installCredentials(ctx) {
       'questionKey',
       'questionProvider',
       'questionModel',
+      'transcriptionBackups',
+      'questionBackups',
       'saveAiKeys',
       'forgetKey',
     ])
@@ -149,6 +201,8 @@ export function installCredentials(ctx) {
         'questionKey',
         'questionProvider',
         'questionModel',
+        'transcriptionBackups',
+        'questionBackups',
         'saveAiKeys',
         'forgetKey',
       ])

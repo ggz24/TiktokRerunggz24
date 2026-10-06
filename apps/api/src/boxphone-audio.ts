@@ -1,9 +1,68 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { LiveError } from './live-service.js';
+import { LiveError, type LiveService } from './live-service.js';
 
 const exec = promisify(execFile);
 let extracting = false;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Validate a request for audio of a library video (or of what a live channel is playing now) and extract it.
+ * Ownership and readiness are resolved before any media process starts.
+ */
+export async function resolveBoxphoneAudio(
+  service: LiveService,
+  ownerId: string,
+  body: { videoId?: unknown; accountId?: unknown; startSeconds?: unknown; seconds?: unknown },
+) {
+  let videoId = body.videoId;
+  let start = body.startSeconds ?? 0;
+  const requestedSeconds = body.seconds ?? 30;
+  if (
+    typeof requestedSeconds !== 'number' ||
+    !Number.isFinite(requestedSeconds) ||
+    requestedSeconds < 5 ||
+    requestedSeconds > 60
+  )
+    throw new LiveError(400, 'Invalid audio segment.');
+  let seconds = requestedSeconds;
+  let target: {
+    accountId: string;
+    startedAt: string;
+    videoId: string;
+    roomId: string | null;
+  } | null = null;
+  if (body.accountId !== undefined) {
+    if (typeof body.accountId !== 'string' || !uuidPattern.test(body.accountId))
+      throw new LiveError(400, 'Invalid account ID.');
+    const session = await service.session(ownerId, body.accountId);
+    if (session.status !== 'live' || !session.videoId || !session.startedAt)
+      throw new LiveError(409, 'The selected channel is not streaming.');
+    videoId = session.videoId;
+    // Use the recent played segment, not audio from a future part of the rerun.
+    const played = (Date.now() - Date.parse(session.startedAt)) / 1000 - 8;
+    if (!Number.isFinite(played) || played < 5)
+      throw new LiveError(409, 'Waiting for the first played audio segment.');
+    seconds = Math.min(seconds, played);
+    start = Math.max(0, played - seconds);
+    target = {
+      accountId: body.accountId,
+      startedAt: session.startedAt,
+      videoId: session.videoId,
+      roomId: await service.currentRoomId(ownerId, body.accountId),
+    };
+  }
+  if (
+    typeof videoId !== 'string' ||
+    !uuidPattern.test(videoId) ||
+    typeof start !== 'number' ||
+    typeof seconds !== 'number'
+  )
+    throw new LiveError(400, 'Invalid video segment.');
+  const file = await service.videoFile(ownerId, videoId);
+  const audio = await extractBoxphoneAudio(file.path, start, seconds, !!target);
+  return { ...audio, videoId, videoName: file.name, target };
+}
 
 export function audioWindow(duration: number, start: number, seconds: number, loop: boolean) {
   if (

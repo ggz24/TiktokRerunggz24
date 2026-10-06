@@ -40,6 +40,38 @@ async function internal(owner: string, path: string, body?: Row) {
   return record(await r.json());
 }
 
+/**
+ * Call the API's Boxphone routes and hand back its status and JSON, including its own Thai error messages.
+ * An empty owner is for the installer and agent routes, which use only the internal token.
+ */
+export async function boxphoneApi(
+  owner: string,
+  method: 'GET' | 'POST' | 'DELETE',
+  path: string,
+  body?: Row,
+  timeoutMs = 125000,
+): Promise<{ status: number; data: Row }> {
+  const token = process.env.INTERNAL_API_TOKEN;
+  if (!token) throw new BoxphoneError('ระบบบัญชียังไม่พร้อม', 503);
+  let r: Response;
+  try {
+    r = await fetch(new URL(path, process.env.API_INTERNAL_URL || 'http://127.0.0.1:4000'), {
+      method,
+      headers: {
+        'x-internal-token': token,
+        ...(owner ? { 'x-livehub-owner': owner } : {}),
+        ...(body ? { 'content-type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    throw new BoxphoneError('ระบบหลังบ้านยังไม่พร้อม', 503);
+  }
+  return { status: r.status, data: record(await r.json().catch(() => ({}))) };
+}
+
 export async function boxphoneCatalog(owner: string) {
   const [accounts, videos, sessions] = await Promise.all([
     internal(owner, '/api/v1/accounts'),
