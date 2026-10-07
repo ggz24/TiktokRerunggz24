@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { apiPath } from '@/lib/base-path';
+import LiveRoundSettings, { type RoundSettings } from './LiveRoundSettings';
 
-type Settings = {
+type Settings = RoundSettings & {
   endAfterMinutes: number | null;
   restartAfterMinutes: number | null;
   dailyStartTime: string | null;
@@ -16,6 +17,11 @@ const defaults: Settings = {
   dailyStartTime: null,
   recoverStream: false,
   closedRoomAction: 'stop',
+  videoRotation: [],
+  productSetRotation: [],
+  autoAddProducts: true,
+  autoPinProduct: false,
+  productPinSelections: {},
 };
 
 function DurationFields({
@@ -78,6 +84,7 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [completed, setCompleted] = useState(0);
   const path = apiPath(`/api/live/sessions/${encodeURIComponent(accountId)}/auto-settings`);
 
   useEffect(() => {
@@ -89,7 +96,8 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
       })
       .then((data) => {
         if (!active) return;
-        setSettings(data.item.settings);
+        setSettings({ ...defaults, ...data.item.settings });
+        setCompleted(data.item.completedRounds ?? 0);
         setPhase(data.item.phase);
         setMessage(data.item.lastError ? `ข้อผิดพลาดล่าสุด: ${data.item.lastError}` : '');
       })
@@ -122,9 +130,10 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
-      if (!response.ok) throw new Error('บันทึกไม่สำเร็จ ตรวจเวลาและลองอีกครั้ง');
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'บันทึกไม่สำเร็จ ตรวจเวลาและลองอีกครั้ง');
       setSettings(data.item.settings);
+      setCompleted(data.item.completedRounds ?? 0);
       setPhase(data.item.phase);
       setMessage('บันทึกโหมด AUTO แล้ว');
     } catch (error) {
@@ -222,7 +231,13 @@ export default function AutoLiveSettingsPanel({ accountId }: { accountId: string
               </select>
             </label>
           )}
-          <p>การเริ่มอัตโนมัติใช้ชื่อไลฟ์และวิดีโอที่บันทึกไว้ของบัญชีนี้</p>
+          <LiveRoundSettings
+            accountId={accountId}
+            settings={settings}
+            change={change}
+            completed={completed}
+          />
+          <p>การเริ่มอัตโนมัติใช้ชื่อไลฟ์ของบัญชี และรายการต่อรอบที่บันทึกไว้ด้านบน</p>
           <button
             type="button"
             className="cyber-btn pink"

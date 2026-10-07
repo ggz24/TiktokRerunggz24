@@ -12,6 +12,7 @@ import { SessionChat, ensureSessionChatTables } from './session-chat.js';
 import { ChatBridge } from './chat-bridge.js';
 import { BoxphoneService, createPgBoxphoneStore, ensureBoxphoneTables } from './boxphone.js';
 import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
+import { ProductPinStore, ensureProductPinTable } from './product-pin-store.js';
 import {
   CommentReplyService,
   createPgCommentReplyStore,
@@ -62,6 +63,7 @@ if (accountConfig) {
   await ensureLiveTables(pool);
   await ensureAutoLiveTable(pool);
   await ensureProductSetTable(pool);
+  await ensureProductPinTable(pool);
   await ensureCommentReplyTables(pool);
   await ensureBoxphoneTables(pool);
   boxphone = new BoxphoneService(createPgBoxphoneStore(pool, accountConfig.encryptionKey));
@@ -234,6 +236,7 @@ const app = createApp(
   commentReplies,
   chatBridge,
   boxphone,
+  accountConfig ? new ProductPinStore(pool, accountConfig.encryptionKey) : undefined,
 );
 
 async function shutdown() {

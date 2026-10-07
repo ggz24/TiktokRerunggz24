@@ -354,8 +354,7 @@ export default function CyberShell({ section, username }: { section: Page; usern
           typeof detail === 'object' &&
           'error' in detail &&
           typeof detail.error === 'string' &&
-          detail.error.startsWith('TikTok ') &&
-          detail.error.length <= 200
+          detail.error.length <= 300
         ) {
           throw new Error(detail.error);
         }
@@ -376,6 +375,17 @@ export default function CyberShell({ section, username }: { section: Page; usern
           accountId: account.id,
           message:
             'ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop',
+        });
+      } else if (
+        started &&
+        typeof started === 'object' &&
+        'pinOutcome' in started &&
+        (started.pinOutcome === 'rejected' || started.pinOutcome === 'unverified')
+      ) {
+        setStartError({
+          accountId: account.id,
+          message:
+            'ไลฟ์เริ่มแล้ว แต่ยังยืนยันการปักหมุดสินค้าไม่ได้ ตรวจคำขอ Pin ในการตั้งค่า AUTO',
         });
       }
     } catch (error) {
@@ -1082,7 +1092,10 @@ export default function CyberShell({ section, username }: { section: Page; usern
       )}
       {modal && (
         <div className="cyber-modal-backdrop" onClick={closeModal}>
-          <div className="cyber-modal" onClick={(e) => e.stopPropagation()}>
+          <div
+            className={`cyber-modal${modal === 'ตั้งค่าบัญชี' ? ' cyber-modal-settings' : ''}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="cyber-modal-head">
               <h2>▣ {modal}</h2>
               <button onClick={closeModal}>

@@ -5,7 +5,7 @@ export type ProductAddOutcome = 'accepted' | 'rejected' | 'unverified';
 export type ReplayableShopRequest = Pick<
   ParsedLiveProductAddCurl,
   'url' | 'body' | 'userAgent' | 'referer' | 'region'
->;
+> & { requestHeaders?: Record<string, string> };
 export type ProductAddSender = (
   request: ReplayableShopRequest & { roomId?: string },
   cookieHeader: string,
@@ -16,6 +16,7 @@ export const sendLiveProductAdd: ProductAddSender = async (request, cookieHeader
   const response = await fetch(request.url, {
     method: 'POST',
     headers: {
+      ...request.requestHeaders,
       accept: 'application/json',
       'content-type': 'application/json',
       origin: 'https://shop.tiktok.com',

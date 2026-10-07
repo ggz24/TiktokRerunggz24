@@ -17,7 +17,10 @@ import {
 } from './accounts.js';
 import { registerLiveRoutes } from './live-routes.js';
 import type { AutoLiveManager } from './auto-live.js';
+import type { ProductPinStore } from './product-pin-store.js';
+import { createRoundProductActions, pinSelectedProduct } from './round-products.js';
 import type { LiveService } from './live-service.js';
+import { LiveError } from './live-service.js';
 import { sendLiveProductAdd, type ProductAddSender } from './live-product-add.js';
 import type { ProductSetInput, ProductSetStore } from './product-set-store.js';
 import type { CommentReplyService } from './ai-comments.js';
@@ -38,6 +41,7 @@ const {
   parseAccountImportCurl,
   parseLiveProductAddCurl,
   parseLiveProductDeleteCurl,
+  parseLiveProductPinCurl,
 } = require('@live-hub/tiktok-client') as typeof import('@live-hub/tiktok-client');
 const mockClient = createTikTokClient(createMockTransport());
 
@@ -57,6 +61,7 @@ export function createApp(
   commentReplies?: CommentReplyService,
   chatBridge?: ChatBridge,
   boxphone?: BoxphoneService,
+  productPins?: ProductPinStore,
 ) {
   if (accountConfig) validateAccountConfig(accountConfig);
   const app = Fastify({ logger: false, requestTimeout: 3_600_000 });
@@ -852,6 +857,122 @@ export function createApp(
   });
 
   if (liveService) {
+    if (accountConfig && productSetStore) {
+      app.post(
+        '/api/v1/live/sessions/:accountId/pin-product',
+        { bodyLimit: 1024 },
+        async (request, reply) => {
+          const owner = ownerFromHeaders(request.headers);
+          if (!owner) return reply.status(401).send({ error: 'Unauthorized.' });
+          const { accountId } = request.params as { accountId: string };
+          const body = request.body as { setId?: unknown; productId?: unknown };
+          if (
+            !validAccountId(accountId) ||
+            !body ||
+            typeof body !== 'object' ||
+            Array.isArray(body) ||
+            Object.keys(body).some((k) => !['setId', 'productId'].includes(k)) ||
+            typeof body.setId !== 'string' ||
+            !validAccountId(body.setId) ||
+            typeof body.productId !== 'string' ||
+            !/^\d{8,24}$/.test(body.productId)
+          )
+            return reply.status(400).send({ error: 'Invalid product selection.' });
+          try {
+            const outcome = await pinSelectedProduct(
+              productSetStore,
+              accountConfig,
+              liveService,
+              productAddSender,
+              owner,
+              accountId,
+              body.setId,
+              body.productId,
+            );
+            return { outcome };
+          } catch (e) {
+            if (e instanceof LiveError)
+              return reply.status(e.statusCode).send({ error: e.message });
+            return reply.status(503).send({ error: 'ไม่ยืนยันผลปักหมุด กรุณาตรวจใน TikTok Shop' });
+          }
+        },
+      );
+    }
+    if (productPins && accountConfig) {
+      app.get('/api/v1/live/sessions/:accountId/product-pin', async (request, reply) => {
+        const owner = ownerFromHeaders(request.headers);
+        if (!owner) return reply.status(401).send({ error: 'Unauthorized.' });
+        const { accountId } = request.params as { accountId: string };
+        if (!validAccountId(accountId))
+          return reply.status(400).send({ error: 'Invalid account ID.' });
+        if (!(await accountConfig.store.findEncrypted(owner, accountId)))
+          return reply.status(404).send({ error: 'Account not found.' });
+        return { hasRequest: await productPins.has(owner, accountId) };
+      });
+      app.put(
+        '/api/v1/live/sessions/:accountId/product-pin',
+        { bodyLimit: 110000 },
+        async (request, reply) => {
+          const owner = ownerFromHeaders(request.headers);
+          if (!owner) return reply.status(401).send({ error: 'Unauthorized.' });
+          const { accountId } = request.params as { accountId: string };
+          if (!validAccountId(accountId))
+            return reply.status(400).send({ error: 'Invalid account ID.' });
+          const secret = await accountConfig.store.findEncrypted(owner, accountId);
+          if (!secret) return reply.status(404).send({ error: 'Account not found.' });
+          const values = request.body as { curl?: unknown };
+          if (
+            !values ||
+            typeof values !== 'object' ||
+            Array.isArray(values) ||
+            Object.keys(values).some((k) => k !== 'curl') ||
+            !(
+              values.curl === null ||
+              (typeof values.curl === 'string' &&
+                values.curl.length > 0 &&
+                values.curl.length <= 100000)
+            )
+          )
+            return reply.status(400).send({ error: 'Invalid pin request.' });
+          try {
+            if (typeof values.curl === 'string') {
+              const parsed = parseLiveProductPinCurl(values.curl);
+              if (parsed.cookieHeader) {
+                const savedCookie = decryptAccountCookie(
+                  secret,
+                  accountConfig.encryptionKey,
+                  owner,
+                  accountId,
+                );
+                const sid = (cookie: string) =>
+                  /(?:^|;\s*)sessionid=([^;]+)/.exec(cookie)?.[1] ??
+                  /(?:^|;\s*)sid_tt=([^;]+)/.exec(cookie)?.[1];
+                if (!sid(savedCookie) || sid(parsed.cookieHeader) !== sid(savedCookie))
+                  return reply.status(409).send({
+                    error: 'Cookie ปักหมุดไม่ตรงกับ session บัญชีนี้ กรุณาอัปเดต session ให้ตรงกัน',
+                  });
+              }
+            }
+            await productPins.save(owner, accountId, values.curl as string | null);
+            return { hasRequest: await productPins.has(owner, accountId) };
+          } catch {
+            return reply.status(400).send({
+              error: 'cURL ปักหมุดไม่ถูกต้อง ต้องเป็นคำขอ Pin/Explain สินค้าจริงใน TikTok Shop',
+            });
+          }
+        },
+      );
+      if (autoLive && productSetStore)
+        autoLive.setRoundActions(
+          createRoundProductActions(
+            productSetStore,
+            productPins,
+            accountConfig,
+            liveService,
+            productAddSender,
+          ),
+        );
+    }
     const onRoomStarted = async (ownerId: string, accountId: string) => {
       if (!productSetStore || !accountConfig) return 'none';
       const sets = await productSetStore.list(ownerId);

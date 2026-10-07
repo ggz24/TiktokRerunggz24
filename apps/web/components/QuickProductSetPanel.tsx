@@ -21,6 +21,37 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
   const [sendingId, setSendingId] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [pinChoices, setPinChoices] = useState<Record<string, string>>({});
+
+  async function pin(item: ProductSet) {
+    if (sendingId) return;
+    setSendingId(item.id);
+    setMessage('');
+    setError('');
+    try {
+      const response = await fetch(apiPath(`/api/live/sessions/${accountId}/pin-product`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          setId: item.id,
+          productId: pinChoices[item.id] || item.productIds[0],
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw Error(result.error || 'ปักหมุดไม่สำเร็จ');
+      if (result.outcome === 'rejected')
+        throw Error('TikTok ไม่รับคำขอปักหมุด ตรวจว่าสินค้าอยู่ในตะกร้าและ session ยังใช้ได้');
+      setMessage(
+        result.outcome === 'accepted'
+          ? 'TikTok ตอบรับการปักหมุดแล้ว ตรวจหมุดในห้อง LIVE'
+          : 'ยังยืนยันผลปักหมุดไม่ได้ กรุณาตรวจใน TikTok Shop',
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ปักหมุดไม่สำเร็จ');
+    } finally {
+      setSendingId('');
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -179,6 +210,27 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
                   ลบออกจาก LIVE
                 </button>
               )}
+              <div className="cyber-round-picker" style={{ width: '100%' }}>
+                <select
+                  aria-label={`เลือกสินค้าปักหมุด ${item.name}`}
+                  value={pinChoices[item.id] || item.productIds[0] || ''}
+                  onChange={(e) => setPinChoices({ ...pinChoices, [item.id]: e.target.value })}
+                >
+                  {item.productIds.map((product, index) => (
+                    <option key={product} value={product}>
+                      สินค้า {index + 1} · {product}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="cyber-btn cyan"
+                  disabled={Boolean(sendingId) || !item.productIds.length}
+                  onClick={() => void pin(item)}
+                >
+                  📌 ปักหมุดตอนนี้
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -196,7 +248,10 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
           {message}
         </p>
       )}
-      <p>คำขอนี้เพิ่มสินค้าเข้ารายการ ส่วนการปักแสดงสินค้าเด่นบนจอ LIVE ใช้คำสั่งอีกชนิด</p>
+      <p>
+        ปักหมุดใช้ session ของบัญชีนี้ · เริ่ม LIVE และเพิ่มสินค้าลงตะกร้าก่อน
+        แล้วเลือกสินค้าที่ต้องการปักได้เลย
+      </p>
     </div>
   );
 }

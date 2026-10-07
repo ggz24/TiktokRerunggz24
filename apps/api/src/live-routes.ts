@@ -382,8 +382,21 @@ export function registerLiveRoutes(
       return reply.status(400).send({ error: 'Invalid LIVE title.' });
     }
     try {
+      if (autoLive) {
+        const result = await autoLive.startRoom(
+          ownerId,
+          accountId,
+          (body as { title: string }).title,
+        );
+        return {
+          item: result.session,
+          roomId: result.roomId,
+          productsOutcome: result.productsOutcome,
+          pinOutcome: result.pinOutcome,
+          round: result.round,
+        };
+      }
       const result = await service.startAuto(ownerId, accountId, (body as { title: string }).title);
-      await autoLive?.onStarted(ownerId, accountId);
       const productsOutcome = onRoomStarted
         ? await onRoomStarted(ownerId, accountId, result.roomId).catch(() => 'unverified' as const)
         : 'none';

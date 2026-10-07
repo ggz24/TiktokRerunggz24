@@ -1150,6 +1150,7 @@ export class LiveService {
     ownerId: string,
     accountId: string,
     title: unknown,
+    options?: { videoId?: string; beforeStream?: (roomId: string) => Promise<unknown> },
   ): Promise<{ session: LiveSession; roomId: string }> {
     if (typeof title !== 'string' || !title.trim() || title.trim().length > 120) {
       throw new LiveError(400, 'Enter a LIVE title before starting.');
@@ -1162,10 +1163,11 @@ export class LiveService {
     try {
       const selectedVideoId = await this.store.getPreferredVideoId(ownerId, accountId);
       const config = await this.store.getConfig(ownerId, accountId);
-      const videoId = selectedVideoId ?? config?.videoId;
+      const videoId = options?.videoId ?? selectedVideoId ?? config?.videoId;
       if (!videoId) throw new LiveError(422, 'Select a video before starting.');
       const { roomId } = await this.autoFetchDestination(ownerId, accountId, videoId, title);
       try {
+        await options?.beforeStream?.(roomId);
         return { session: await this.start(ownerId, accountId, true), roomId };
       } catch (error) {
         // A room may have been created even when the encoder cannot start.
@@ -1271,6 +1273,7 @@ export class LiveService {
         typeof tracks === 'object' && tracks.videoCodec === 'h264' && tracks.audioCodec === 'aac';
       if (state.cancelled) return this.session(ownerId, accountId);
       const destination = await this.destinationProvider.resolve({ ownerId, accountId, config });
+      if (state.cancelled) return this.session(ownerId, accountId);
       const child = this.spawnProcess(
         'ffmpeg',
         [

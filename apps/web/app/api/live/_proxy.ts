@@ -75,6 +75,28 @@ function safeSession(value: unknown) {
 
 function safeResult(path: string, result: unknown) {
   const data = asRecord(result);
+  const outcome = (value: unknown) =>
+    ['accepted', 'rejected', 'unverified', 'none'].includes(String(value)) ? value : null;
+  const round = (value: unknown) => {
+    if (!value) return null;
+    const plan = asRecord(value);
+    return {
+      index: Number.isSafeInteger(plan.index) && Number(plan.index) >= 0 ? plan.index : 0,
+      ...(typeof plan.videoId === 'string' && accountIdPattern.test(plan.videoId)
+        ? { videoId: plan.videoId }
+        : {}),
+      ...(typeof plan.productSetId === 'string' && accountIdPattern.test(plan.productSetId)
+        ? { productSetId: plan.productSetId }
+        : {}),
+      addProducts: plan.addProducts === true,
+      pinProduct: plan.pinProduct === true,
+      ...(typeof plan.pinProductId === 'string' && /^\d{8,24}$/.test(plan.pinProductId)
+        ? { pinProductId: plan.pinProductId }
+        : {}),
+    };
+  };
+  if (path.endsWith('/product-pin')) return { hasRequest: data.hasRequest === true };
+  if (path.endsWith('/pin-product')) return { outcome: outcome(data.outcome) };
   if (path.endsWith('/auto-settings') && data.item) {
     const item = asRecord(data.item);
     const settings = asRecord(item.settings);
@@ -89,10 +111,40 @@ function safeResult(path: string, result: unknown) {
             typeof settings.dailyStartTime === 'string' ? settings.dailyStartTime : null,
           recoverStream: settings.recoverStream === true,
           closedRoomAction: settings.closedRoomAction === 'new_room' ? 'new_room' : 'stop',
+          videoRotation: Array.isArray(settings.videoRotation)
+            ? settings.videoRotation
+                .filter((id) => typeof id === 'string' && accountIdPattern.test(id))
+                .slice(0, 100)
+            : [],
+          productSetRotation: Array.isArray(settings.productSetRotation)
+            ? settings.productSetRotation
+                .filter((id) => typeof id === 'string' && accountIdPattern.test(id))
+                .slice(0, 100)
+            : [],
+          autoAddProducts: settings.autoAddProducts !== false,
+          autoPinProduct: settings.autoPinProduct === true,
+          productPinSelections: Object.fromEntries(
+            Object.entries(asRecord(settings.productPinSelections))
+              .filter(
+                ([id, product]) =>
+                  accountIdPattern.test(id) &&
+                  typeof product === 'string' &&
+                  /^\d{8,24}$/.test(product),
+              )
+              .slice(0, 100),
+          ),
         },
         phase: ['idle', 'live', 'resting'].includes(String(item.phase)) ? item.phase : 'idle',
         phaseStartedAt: typeof item.phaseStartedAt === 'string' ? item.phaseStartedAt : null,
         lastError: typeof item.lastError === 'string' ? item.lastError : null,
+        completedRounds:
+          Number.isSafeInteger(item.completedRounds) && Number(item.completedRounds) >= 0
+            ? item.completedRounds
+            : 0,
+        activeRound: round(item.activeRound),
+        nextRound: round(item.nextRound),
+        productsOutcome: outcome(item.productsOutcome),
+        pinOutcome: outcome(item.pinOutcome),
       },
     };
   }
@@ -135,6 +187,9 @@ function safeResult(path: string, result: unknown) {
           ['accepted', 'rejected', 'unverified', 'none'].includes(String(data.productsOutcome))
             ? { productsOutcome: data.productsOutcome }
             : {}),
+          ...(path.endsWith('/start-auto')
+            ? { pinOutcome: outcome(data.pinOutcome), round: data.round }
+            : {}),
         };
       }
       if (
@@ -173,6 +228,35 @@ export async function proxyLive(
         : {}),
     } as RequestInit & { duplex?: 'half' });
     if (!response.ok) {
+      if (
+        path.endsWith('/auto-settings') ||
+        path.endsWith('/product-pin') ||
+        path.endsWith('/pin-product')
+      ) {
+        const data = asRecord(await response.json().catch(() => null));
+        const allowed = new Set([
+          'เลือกคลิปที่พร้อมใช้งานจากคลังของคุณเท่านั้น',
+          'เลือกชุดสินค้าที่ผูกกับบัญชีนี้เท่านั้น',
+          'เลือกชุดของบัญชีนี้หรือชุดที่ยังไม่ผูกบัญชีเท่านั้น',
+          'session ในคำขอสินค้าไม่ตรงกับบัญชีนี้ กรุณาบันทึก cURL ใหม่',
+          'บันทึก cURL ปักหมุดของบัญชีนี้ก่อนเปิดปักหมุดอัตโนมัติ',
+          'เลือกชุดสินค้าสำหรับปักหมุดก่อน',
+          'สินค้าที่เลือกปักหมุดไม่ได้อยู่ในชุดนี้',
+          'ชุดสินค้าถูกลบหรือผูกกับบัญชีอื่น',
+          'เริ่ม LIVE ของบัญชีนี้ก่อนปักหมุด',
+          'ไม่ยืนยันผลปักหมุด กรุณาตรวจใน TikTok Shop',
+          'กำลังเริ่มหรือเปลี่ยนรอบไลฟ์ กรุณารอแล้วบันทึกอีกครั้ง',
+        ]);
+        if (typeof data.error === 'string' && allowed.has(data.error))
+          return liveError(data.error, response.status);
+        if (path.endsWith('/product-pin') && response.status === 400)
+          return liveError(
+            'รูปแบบ cURL ปักหมุดยังไม่รองรับ กรุณาส่งคำขอจากปุ่ม Pin เพื่อตรวจสอบ',
+            400,
+          );
+        if (path.endsWith('/product-pin') && response.status === 409)
+          return liveError('session ใน cURL ไม่ตรงกับบัญชีนี้ กรุณาเลือกบัญชีให้ถูกต้อง', 409);
+      }
       if (path.endsWith('/start-auto') || path.endsWith('/auto-destination')) {
         const data = asRecord(await response.json().catch(() => null));
         const code =

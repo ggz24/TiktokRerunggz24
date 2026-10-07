@@ -27,6 +27,11 @@ export {
   parseCreatedRoom,
 } from './live-room';
 export { createRapidApiRoomSigner } from './rapidapi-signer';
+export {
+  parseLiveProductPinCurl,
+  prepareLiveProductRequest,
+  createLiveProductPinRequest,
+} from './live-product-pin';
 export type {
   CreateRoomInput,
   CreatedRoom,

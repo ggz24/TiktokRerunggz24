@@ -404,6 +404,13 @@ export default function LiveSessionPanel({
           setError(
             'ไลฟ์เริ่มแล้ว แต่ยังเพิ่มชุดสินค้าในตะกร้าไม่ได้ ตรวจชุดสินค้าและคำขอจาก TikTok Shop',
           );
+        } else if (
+          'pinOutcome' in data &&
+          (data.pinOutcome === 'rejected' || data.pinOutcome === 'unverified')
+        ) {
+          setError(
+            'ไลฟ์เริ่มแล้ว แต่ยังยืนยันการปักหมุดสินค้าไม่ได้ ตรวจคำขอ Pin ในการตั้งค่า AUTO',
+          );
         }
       } else {
         const roomEnd = 'roomEnd' in data ? data.roomEnd : '';

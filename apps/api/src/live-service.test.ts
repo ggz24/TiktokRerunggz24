@@ -696,6 +696,69 @@ test('start creates a room from the selected video and stop finishes that room',
   );
 });
 
+test('round video overrides the base clip and product preparation finishes before encoder starts', async () => {
+  await withFixture(
+    async ({ service, children, configs }) => {
+      const base = await service.uploadVideo(owner, 'base.mp4', Readable.from(mp4));
+      const round = await service.uploadVideo(owner, 'round.mp4', Readable.from(mp4));
+      await service.selectVideo(owner, accountId, base.id);
+      let prepared = false;
+      const result = await service.startAuto(owner, accountId, 'Round LIVE', {
+        videoId: round.id,
+        beforeStream: async (room) => {
+          assert.equal(room, '1234567890123456789');
+          assert.equal(children.length, 0);
+          assert.equal(configs.get(accountId)?.videoId, round.id);
+          prepared = true;
+        },
+      });
+      assert.equal(prepared, true);
+      assert.equal(children.length, 1);
+      assert.equal(result.session.videoId, round.id);
+    },
+    true,
+    undefined,
+    async () => ({
+      roomId: '1234567890123456789',
+      streamId: '2234567890123456789',
+      rtmpUrl: 'rtmps://example.invalid/live',
+      streamKey: secret,
+    }),
+  );
+});
+
+test('cancelled preparation closes the new room and never starts an encoder', async () => {
+  const ended: string[] = [];
+  await withFixture(
+    async ({ service, children }) => {
+      const video = await service.uploadVideo(owner, 'round.mp4', Readable.from(mp4));
+      await assert.rejects(
+        service.startAuto(owner, accountId, 'Cancelled', {
+          videoId: video.id,
+          beforeStream: async () => {
+            throw Error('cancelled');
+          },
+        }),
+        /cancelled/,
+      );
+      assert.equal(children.length, 0);
+      assert.deepEqual(ended, ['1234567890123456789']);
+    },
+    true,
+    undefined,
+    async () => ({
+      roomId: '1234567890123456789',
+      streamId: '2234567890123456789',
+      rtmpUrl: 'rtmps://example.invalid/live',
+      streamKey: secret,
+    }),
+    async ({ roomId }) => {
+      ended.push(roomId!);
+      return 'ended';
+    },
+  );
+});
+
 test('a video selection storage error cannot leave a newly created room behind', async () => {
   let created = false;
   await withFixture(
