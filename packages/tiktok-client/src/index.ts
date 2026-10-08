@@ -1,4 +1,4 @@
-﻿export { createTikTokClient } from './client';
+export { createTikTokClient } from './client';
 export { createMockTransport } from './mock-transport';
 export { mockAccountId, mockLiveSessionId } from './fixtures';
 export { parseSanitizedCurl, substituteRequestTemplate } from './request-template';
@@ -10,6 +10,8 @@ export {
   forLiveProductRoom,
 } from './live-product-curl';
 export type { ParsedLiveProductAddCurl, ParsedLiveProductDeleteCurl } from './live-product-curl';
+export { parseStatsCurl } from './stats-curl';
+export type { ParsedStatsCurl } from './stats-curl';
 export { parseProxyConfig } from './proxy';
 export {
   parseLiveChatCurl,

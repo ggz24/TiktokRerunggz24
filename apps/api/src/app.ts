@@ -29,6 +29,8 @@ import type { ChatBridge } from './chat-bridge.js';
 import { registerChatBridgeRoutes } from './chat-bridge-routes.js';
 import type { BoxphoneService } from './boxphone.js';
 import { registerBoxphoneRoutes } from './boxphone-routes.js';
+import type { StatsSourceService } from './stats-sources.js';
+import { registerStatsSourceRoutes } from './stats-sources-routes.js';
 
 const require = createRequire(import.meta.url);
 const { createMockEvent, validateEvent } =
@@ -62,6 +64,7 @@ export function createApp(
   chatBridge?: ChatBridge,
   boxphone?: BoxphoneService,
   productPins?: ProductPinStore,
+  statsSources?: StatsSourceService,
 ) {
   if (accountConfig) validateAccountConfig(accountConfig);
   const app = Fastify({ logger: false, requestTimeout: 3_600_000 });
@@ -106,6 +109,8 @@ export function createApp(
         accountConfig.internalToken,
       ),
     );
+
+  if (statsSources && accountConfig) registerStatsSourceRoutes(app, statsSources, ownerFromHeaders);
 
   app.get('/health/live', async () => ({ status: 'alive', service: 'api' }));
 

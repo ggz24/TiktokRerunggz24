@@ -10,6 +10,7 @@ import QuickProductSetPanel from './QuickProductSetPanel';
 import AutoLiveSettingsPanel from './AutoLiveSettingsPanel';
 import AiCommentReplyPanel from './AiCommentReplyPanel';
 import BoxphonePanel from './BoxphonePanel';
+import SalesPanel from './SalesPanel';
 import {
   CircleCheck,
   LogOut,
@@ -1076,6 +1077,8 @@ export default function CyberShell({ section, username }: { section: Page; usern
             commentsView()
           ) : section === 'boxphone' ? (
             <BoxphonePanel />
+          ) : section === 'sales' ? (
+            <SalesPanel />
           ) : section === 'analytics' ? (
             analyticsView()
           ) : (

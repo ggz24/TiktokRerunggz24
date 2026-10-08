@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import { createClient } from 'redis';
 import { createApp } from './app.js';
 import { createPgAccountStore, ensureAccountTable } from './account-store.js';
-import { parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
+import { decryptAccountCookie, parseEncryptionKeyHex, type AccountConfig } from './accounts.js';
 import { createPgLiveStore, ensureLiveTables } from './live-store.js';
 import { promises as fsPromises } from 'node:fs';
 import { createCloudTranscoder } from './cloud-transcode.js';
@@ -11,6 +11,11 @@ import { AutoLiveManager, ensureAutoLiveTable } from './auto-live.js';
 import { SessionChat, ensureSessionChatTables } from './session-chat.js';
 import { ChatBridge } from './chat-bridge.js';
 import { BoxphoneService, createPgBoxphoneStore, ensureBoxphoneTables } from './boxphone.js';
+import {
+  StatsSourceService,
+  createPgStatsSourceStore,
+  ensureStatsSourceTable,
+} from './stats-sources.js';
 import { createPgProductSetStore, ensureProductSetTable } from './product-set-store.js';
 import { ProductPinStore, ensureProductPinTable } from './product-pin-store.js';
 import {
@@ -56,6 +61,7 @@ let autoLive: AutoLiveManager | undefined;
 let commentReplies: CommentReplyService | undefined;
 let chatBridge: ChatBridge | undefined;
 let boxphone: BoxphoneService | undefined;
+let statsSources: StatsSourceService | undefined;
 let serverChat: SessionChat | undefined;
 let chatTimer: ReturnType<typeof setInterval> | undefined;
 if (accountConfig) {
@@ -67,6 +73,17 @@ if (accountConfig) {
   await ensureCommentReplyTables(pool);
   await ensureBoxphoneTables(pool);
   boxphone = new BoxphoneService(createPgBoxphoneStore(pool, accountConfig.encryptionKey));
+  await ensureStatsSourceTable(pool);
+  statsSources = new StatsSourceService(
+    createPgStatsSourceStore(pool, accountConfig.encryptionKey),
+    {
+      accountExists: async (owner, id) => !!(await accountConfig.store.findEncrypted(owner, id)),
+      cookieFor: async (owner, id) => {
+        const secret = await accountConfig.store.findEncrypted(owner, id);
+        return secret ? decryptAccountCookie(secret, accountConfig.encryptionKey, owner, id) : null;
+      },
+    },
+  );
   await ensureSessionChatTables(pool);
   const rapidApiKey = process.env.RAPIDAPI_KEY?.trim();
   const autoRoomCreator = rapidApiKey
@@ -237,6 +254,7 @@ const app = createApp(
   chatBridge,
   boxphone,
   accountConfig ? new ProductPinStore(pool, accountConfig.encryptionKey) : undefined,
+  statsSources,
 );
 
 async function shutdown() {

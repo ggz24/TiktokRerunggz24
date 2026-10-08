@@ -28,7 +28,7 @@ function invalid(): never {
   throw new Error('Invalid TikTok Shop live product cURL.');
 }
 
-function tokenize(input: string): string[] {
+export function tokenize(input: string): string[] {
   if (!input || input.length > 100_000) invalid();
   const tokens: string[] = [];
   let current = '';
