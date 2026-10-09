@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiPath } from '@/lib/base-path';
 import { confirmDialog } from '@/lib/confirm';
+import CopyKeyword from './CopyKeyword';
 
 type Account = {
   id: string;
@@ -419,6 +420,10 @@ export default function ProductCurlPanel() {
             หาก cURL มี Cookie ระบบจะใช้ Cookie จาก cURL ในการส่งสินค้าเสมอ บัญชีที่เลือกใช้กำหนดว่า
             จะส่งชุดนี้ซ้ำเมื่อเริ่ม LIVE ของบัญชีใด
           </p>
+          <CopyKeyword
+            text="live_product/add"
+            hint="พิมพ์คำนี้ในช่อง Filter ของแท็บ Network (F12) แล้วคัดลอกคำขอเพิ่มสินค้าเป็น cURL"
+          />
           <label className="cyber-field">
             cURL จาก TikTok Shop Streamer Desktop
             <textarea
@@ -442,6 +447,10 @@ export default function ProductCurlPanel() {
             cURL ที่บันทึกเก็บเข้ารหัสไว้ในระบบ และจะแสดงในช่องนี้เมื่อกดแก้ไขชุด (มีคุกกี้และ token
             อย่าแชร์หน้าจอ) เมื่อ token หมดอายุ ให้วาง cURL ใหม่ทับแล้วตรวจรายการก่อนบันทึก
           </p>
+          <CopyKeyword
+            text="live_product/delete"
+            hint="พิมพ์คำนี้ในช่อง Filter ของแท็บ Network (F12) แล้วคัดลอกคำขอลบสินค้าเป็น cURL"
+          />
           <label className="cyber-field">
             cURL ลบสินค้า (ไม่บังคับ) จาก <code>live_product/delete</code>
             <textarea
