@@ -7,6 +7,7 @@ import LiveSessionPanel from './LiveSessionPanel';
 import VideoLibraryPanel from './VideoLibraryPanel';
 import ProductCurlPanel from './ProductCurlPanel';
 import QuickProductSetPanel from './QuickProductSetPanel';
+import AccountStatusPanel, { type AccountStatus } from './AccountStatusPanel';
 import AutoLiveSettingsPanel from './AutoLiveSettingsPanel';
 import AiCommentReplyPanel from './AiCommentReplyPanel';
 import BoxphonePanel from './BoxphonePanel';
@@ -180,6 +181,8 @@ export default function CyberShell({ section, username }: { section: Page; usern
   const [liveCount, setLiveCount] = useState(0);
   const [dashboardSessions, setDashboardSessions] = useState<Record<string, StreamSession>>({});
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [accountStatus, setAccountStatus] = useState<Record<string, AccountStatus>>({});
+  const [accountStatusLoaded, setAccountStatusLoaded] = useState(false);
   const [streamVideos, setStreamVideos] = useState<StreamVideo[]>([]);
   const [streamSession, setStreamSession] = useState<StreamSession | null>(null);
   const [streamVideoId, setStreamVideoId] = useState('');
@@ -254,6 +257,19 @@ export default function CyberShell({ section, username }: { section: Page; usern
     } catch {
       setSessionsLoaded(false);
     }
+    try {
+      const response = await fetch(apiPath('/api/live/account-status'), { cache: 'no-store' });
+      if (!response.ok) throw new Error('load failed');
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) {
+        throw new Error('invalid response');
+      }
+      const items = data.items as AccountStatus[];
+      setAccountStatus(Object.fromEntries(items.map((item) => [item.accountId, item])));
+      setAccountStatusLoaded(true);
+    } catch {
+      setAccountStatusLoaded(false);
+    }
   }, []);
   useEffect(() => {
     if (section !== 'dashboard' && section !== 'accounts') return;
@@ -261,6 +277,10 @@ export default function CyberShell({ section, username }: { section: Page; usern
     const timer = window.setInterval(() => void loadDashboardSessions(), 10_000);
     return () => window.clearInterval(timer);
   }, [section, loadDashboardSessions]);
+  useEffect(() => {
+    // A closed dialog may have changed the cart or AUTO settings; refresh the card status now.
+    if (!modal && (section === 'dashboard' || section === 'accounts')) void loadDashboardSessions();
+  }, [modal, section, loadDashboardSessions]);
   const notify = (value: string) => {
     setToast(value);
     window.setTimeout(() => setToast(''), 3500);
@@ -761,6 +781,9 @@ export default function CyberShell({ section, username }: { section: Page; usern
             )}
           </div>
         </div>
+        {connected && (
+          <AccountStatusPanel status={accountStatus[account.id]} loaded={accountStatusLoaded} />
+        )}
         <div className="cyber-card-actions">
           <Btn
             tone="cyan"

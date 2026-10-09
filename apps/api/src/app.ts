@@ -31,6 +31,7 @@ import type { BoxphoneService } from './boxphone.js';
 import { registerBoxphoneRoutes } from './boxphone-routes.js';
 import type { StatsSourceService } from './stats-sources.js';
 import { registerStatsSourceRoutes } from './stats-sources-routes.js';
+import { CartStatusTracker, cartForRoom, cartStateFor, type CartSource } from './cart-status.js';
 
 const require = createRequire(import.meta.url);
 const { createMockEvent, validateEvent } =
@@ -84,6 +85,35 @@ export function createApp(
 
   function validAccountId(id: string | undefined): id is string {
     return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  }
+
+  const cart = new CartStatusTracker();
+
+  /** Remember what Live Hub just did to the live cart; TikTok cannot be asked for it later. */
+  async function noteCart(
+    ownerId: string,
+    accountId: string | null,
+    set: { name: string; productCount: number },
+    outcome: 'accepted' | 'rejected' | 'unverified' | 'none',
+    source: CartSource,
+    options: { removing?: boolean; roomId?: string | null } = {},
+  ) {
+    const state = cartStateFor(outcome, options.removing);
+    if (!state || !accountId) return;
+    const roomId =
+      options.roomId !== undefined
+        ? options.roomId
+        : liveService
+          ? await liveService.currentRoomId(ownerId, accountId).catch(() => null)
+          : null;
+    cart.record(ownerId, accountId, {
+      state,
+      roomId,
+      setName: set.name,
+      productCount: set.productCount,
+      source,
+      at: new Date().toISOString(),
+    });
   }
 
   if (commentReplies && accountConfig) {
@@ -442,6 +472,82 @@ export function createApp(
       return reply.status(503).send({ error: 'Product set could not be updated.' });
     }
   });
+  app.get('/api/v1/live/account-status', async (request, reply) => {
+    if (!accountConfig || !liveService)
+      return reply.status(503).send({ error: 'Account status is unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    try {
+      const [accounts, sets] = await Promise.all([
+        accountConfig.store.list(ownerId),
+        productSetStore ? productSetStore.list(ownerId) : Promise.resolve([]),
+      ]);
+      const items = await Promise.all(
+        accounts.map(async (account) => {
+          const roomId = await liveService.currentRoomId(ownerId, account.id).catch(() => null);
+          const record = cartForRoom(cart.get(ownerId, account.id), roomId);
+          const auto = sets.find((set) => set.accountId === account.id && set.autoApply);
+          const replies = commentReplies
+            ? await commentReplies.state(ownerId, account.id).catch(() => null)
+            : null;
+          const rounds = autoLive
+            ? await autoLive.get(ownerId, account.id).catch(() => null)
+            : null;
+          const lastReply = replies?.history.find((entry) => !entry.preview) ?? null;
+          return {
+            accountId: account.id,
+            hasOpenRoom: roomId !== null,
+            cart: record
+              ? {
+                  state: record.state,
+                  setName: record.setName,
+                  productCount: record.productCount,
+                  source: record.source,
+                  at: record.at,
+                }
+              : null,
+            autoSet: auto ? { name: auto.name, productCount: auto.productIds.length } : null,
+            ai: replies
+              ? {
+                  enabled: replies.settings.enabled,
+                  aiReady: replies.aiReady,
+                  chatConnected: replies.connection?.connected ?? replies.chatReady,
+                  chatMessage: replies.connection?.message ?? '',
+                  model: replies.settings.model,
+                  answerWhen: replies.settings.answerWhen,
+                  sentCount: replies.history.filter(
+                    (entry) => !entry.preview && entry.status === 'sent',
+                  ).length,
+                  lastReply: lastReply
+                    ? { status: lastReply.status, at: lastReply.createdAt }
+                    : null,
+                }
+              : null,
+            auto: rounds
+              ? {
+                  phase: rounds.phase,
+                  phaseStartedAt: rounds.phaseStartedAt,
+                  completedRounds: rounds.completedRounds,
+                  lastError: rounds.lastError,
+                  endAfterMinutes: rounds.settings.endAfterMinutes,
+                  restartAfterMinutes: rounds.settings.restartAfterMinutes,
+                  dailyStartTime: rounds.settings.dailyStartTime,
+                  recoverStream: rounds.settings.recoverStream,
+                  autoAddProducts: rounds.settings.autoAddProducts !== false,
+                  autoPinProduct: rounds.settings.autoPinProduct === true,
+                  videoCount: rounds.settings.videoRotation?.length ?? 0,
+                  setCount: rounds.settings.productSetRotation?.length ?? 0,
+                }
+              : null,
+          };
+        }),
+      );
+      return { items };
+    } catch {
+      return reply.status(503).send({ error: 'Cart status is unavailable.' });
+    }
+  });
+
   app.post('/api/v1/live/product-sets/:id/send', async (request, reply) => {
     if (!productSetStore || !accountConfig)
       return reply.status(503).send({ error: 'Product sets are unavailable.' });
@@ -460,6 +566,13 @@ export function createApp(
           return { outcome: 'queued', roomId: '', productCount: saved.productIds.length };
         }
         const outcome = await sendSavedSetToRoom(ownerId, saved);
+        await noteCart(
+          ownerId,
+          saved.accountId,
+          { name: saved.name, productCount: saved.productIds.length },
+          outcome,
+          'manual',
+        );
         const result = {
           outcome,
           roomId: roomId ?? parsed.roomId,
@@ -522,6 +635,14 @@ export function createApp(
         );
       }
       const outcome = await productAddSender(parsed, cookieHeader);
+      await noteCart(
+        ownerId,
+        saved.accountId,
+        { name: saved.name, productCount: parsed.productIds.length },
+        outcome,
+        'manual',
+        { removing: true },
+      );
       const result = { outcome, productCount: parsed.productIds.length };
       if (outcome === 'rejected') return reply.status(422).send(result);
       if (outcome === 'unverified') return reply.status(202).send(result);
@@ -987,16 +1108,39 @@ export function createApp(
           }
         },
       );
-      if (autoLive && productSetStore)
-        autoLive.setRoundActions(
-          createRoundProductActions(
-            productSetStore,
-            productPins,
-            accountConfig,
-            liveService,
-            productAddSender,
-          ),
+      if (autoLive && productSetStore) {
+        const store = productSetStore;
+        const actions = createRoundProductActions(
+          store,
+          productPins,
+          accountConfig,
+          liveService,
+          productAddSender,
         );
+        const beforeStream = actions.beforeStream.bind(actions);
+        actions.beforeStream = async (owner, account, room, plan) => {
+          const outcome = await beforeStream(owner, account, room, plan);
+          try {
+            const id =
+              plan.productSetId ??
+              (await store.list(owner)).find((s) => s.accountId === account && s.autoApply)?.id;
+            const set = id ? await store.find(owner, id) : null;
+            if (set)
+              await noteCart(
+                owner,
+                account,
+                { name: set.name, productCount: set.productIds.length },
+                outcome,
+                'round',
+                { roomId: room },
+              );
+          } catch {
+            // The cart note is informational and must never fail a round.
+          }
+          return outcome;
+        };
+        autoLive.setRoundActions(actions);
+      }
     }
     const onRoomStarted = async (ownerId: string, accountId: string) => {
       if (!productSetStore || !accountConfig) return 'none';
@@ -1006,7 +1150,15 @@ export function createApp(
       const saved = await productSetStore.find(ownerId, selected.id);
       if (!saved) return 'none';
       try {
-        return await sendSavedSetToRoom(ownerId, saved);
+        const outcome = await sendSavedSetToRoom(ownerId, saved);
+        await noteCart(
+          ownerId,
+          accountId,
+          { name: saved.name, productCount: saved.productIds.length },
+          outcome,
+          'live-start',
+        );
+        return outcome;
       } catch {
         return 'unverified';
       }

@@ -567,6 +567,11 @@ test('a saved set uses the captured Shop request unchanged when linked to a LIVE
   assert.equal(queued.json().queuedForLive, true);
   assert.equal(state.saved.autoApply, true);
   assert.equal(sends, 1);
+  const noRoom = (
+    await app.inject({ method: 'GET', url: '/api/v1/live/account-status', headers })
+  ).json().items[0];
+  assert.equal(noRoom.hasOpenRoom, false);
+  assert.equal(noRoom.cart, null); // nothing is in the cart of a LIVE that is not running
   const beforeLive = await app.inject({
     method: 'POST',
     url: '/api/v1/live/products/add',
@@ -580,6 +585,20 @@ test('a saved set uses the captured Shop request unchanged when linked to a LIVE
   assert.equal(sent.statusCode, 200);
   assert.equal(sent.json().roomId, roomId);
   assert.equal(sends, 3);
+  const cartStatus = async () =>
+    (await app.inject({ method: 'GET', url: '/api/v1/live/account-status', headers })).json()
+      .items[0];
+  const inCart = await cartStatus();
+  assert.equal(inCart.hasOpenRoom, true);
+  assert.equal(inCart.cart.state, 'added');
+  assert.equal(inCart.cart.setName, 'Saved set');
+  assert.equal(inCart.cart.source, 'manual');
+  assert.equal(inCart.autoSet.name, 'Saved set');
+  assert.equal(JSON.stringify(inCart).includes('sessionid'), false);
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/v1/live/account-status' })).statusCode,
+    401,
+  );
   const direct = await app.inject({
     method: 'POST',
     url: '/api/v1/live/products/add',
@@ -597,6 +616,7 @@ test('a saved set uses the captured Shop request unchanged when linked to a LIVE
   assert.equal(started.statusCode, 200);
   assert.equal(started.json().productsOutcome, 'accepted');
   assert.equal(sends, 5);
+  assert.equal((await cartStatus()).cart.source, 'live-start');
   await app.close();
 });
 
