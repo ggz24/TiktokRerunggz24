@@ -333,6 +333,21 @@ test('named product sets stay owner-scoped and only send after the explicit acti
         }
       }
     },
+    setAutoApply: async (ownerId, id, enabled) => {
+      const selected = records.find((item) => item.ownerId === ownerId && item.id === id);
+      if (!selected) return 'not-found';
+      if (!enabled) {
+        selected.autoApply = false;
+        return 'ok';
+      }
+      if (!selected.accountId) return 'no-account';
+      for (const item of records) {
+        if (item.ownerId === ownerId && item.accountId === selected.accountId) {
+          item.autoApply = item.id === id;
+        }
+      }
+      return 'ok';
+    },
   };
   let sends = 0;
   const app = createApp(
@@ -411,6 +426,15 @@ test('named product sets stay owner-scoped and only send after the explicit acti
   assert.equal(sent.statusCode, 200);
   assert.equal(sent.json().outcome, 'accepted');
   assert.equal(sends, 1);
+  const autoUrl = `/api/v1/live/product-sets/${setId}/auto`;
+  const auto = (enabled: unknown, as: typeof headers | null = headers) =>
+    app.inject({ method: 'POST', url: autoUrl, headers: as ?? undefined, payload: { enabled } });
+  assert.equal((await auto(true, null)).statusCode, 401);
+  assert.equal((await auto(true, otherHeaders)).statusCode, 404);
+  assert.equal((await auto('yes')).statusCode, 400);
+  assert.equal((await auto(true)).statusCode, 409); // this set has no linked account
+  assert.deepEqual((await auto(false)).json(), { id: setId, autoApply: false });
+  assert.equal(sends, 1); // toggling never sends anything to TikTok
   const removeUrl = `/api/v1/live/product-sets/${setId}/remove`;
   assert.equal((await app.inject({ method: 'POST', url: removeUrl, headers })).statusCode, 409);
   const deleteCurl = (ids: string[]) =>
@@ -485,6 +509,7 @@ test('a saved set uses the captured Shop request unchanged when linked to a LIVE
     selectForLive: async () => {
       if (state.saved) state.saved.autoApply = true;
     },
+    setAutoApply: async () => 'ok',
   };
   const service = {
     currentRoomId: async () => currentRoomId,

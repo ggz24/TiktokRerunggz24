@@ -70,6 +70,8 @@ export async function proxyProductSet(
             422,
           );
       }
+      if (path.endsWith('/auto') && response.status === 409)
+        return error('ต้องเลือกบัญชี LIVE ให้ชุดนี้ก่อน จึงจะเปิดเพิ่มตะกร้าอัตโนมัติได้', 409);
       if (response.status === 400)
         return error('ข้อมูลชุดสินค้าไม่ถูกต้อง ตรวจชื่อ cURL และบัญชีที่เลือก', 400);
       if (response.status === 404) return error('ไม่พบชุดสินค้าหรือบัญชีที่เลือก', 404);

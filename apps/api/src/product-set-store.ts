@@ -35,6 +35,12 @@ export interface ProductSetStore {
   update(ownerId: string, id: string, input: ProductSetInput): Promise<ProductSetItem | null>;
   delete(ownerId: string, id: string): Promise<boolean>;
   selectForLive(ownerId: string, id: string): Promise<void>;
+  /** Turn the automatic add at LIVE start on or off for one set (one set per account can be on). */
+  setAutoApply(
+    ownerId: string,
+    id: string,
+    enabled: boolean,
+  ): Promise<'ok' | 'not-found' | 'no-account'>;
 }
 
 type Row = {
@@ -242,6 +248,27 @@ export function createPgProductSetStore(pool: Pool, key: Buffer): ProductSetStor
         [ownerId, id],
       );
       return result.rows.length > 0;
+    },
+    async setAutoApply(ownerId, id, enabled) {
+      const found = await pool.query<{ account_id: string | null }>(
+        'SELECT account_id FROM livehub_product_sets WHERE owner_id = $1 AND id = $2',
+        [ownerId, id],
+      );
+      const row = found.rows[0];
+      if (!row) return 'not-found';
+      if (!enabled) {
+        await pool.query(
+          'UPDATE livehub_product_sets SET auto_apply = FALSE WHERE owner_id = $1 AND id = $2',
+          [ownerId, id],
+        );
+        return 'ok';
+      }
+      if (!row.account_id) return 'no-account';
+      await pool.query(
+        'UPDATE livehub_product_sets SET auto_apply = (id = $2) WHERE owner_id = $1 AND account_id = $3',
+        [ownerId, id, row.account_id],
+      );
+      return 'ok';
     },
     async selectForLive(ownerId, id) {
       await pool.query(

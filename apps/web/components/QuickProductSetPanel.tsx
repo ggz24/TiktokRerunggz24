@@ -134,6 +134,52 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
     }
   }
 
+  async function toggleAuto(item: ProductSet) {
+    if (sendingId) return;
+    const enabled = !item.autoApply;
+    setSendingId(item.id);
+    setMessage('');
+    setError('');
+    try {
+      const response = await fetch(apiPath(`/api/live/product-sets/${item.id}/auto`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!response.ok) {
+        const result: unknown = await response.json().catch(() => null);
+        throw new Error(
+          result &&
+            typeof result === 'object' &&
+            'error' in result &&
+            typeof result.error === 'string'
+            ? result.error
+            : 'ตั้งค่าเพิ่มตะกร้าอัตโนมัติไม่สำเร็จ',
+        );
+      }
+      setSets((current) =>
+        current.map((set) => ({
+          ...set,
+          autoApply:
+            set.id === item.id
+              ? enabled
+              : enabled && set.accountId === item.accountId
+                ? false
+                : set.autoApply,
+        })),
+      );
+      setMessage(
+        enabled
+          ? `เปิดแล้ว: เมื่อบัญชีนี้เริ่ม LIVE ระบบจะเพิ่มชุด “${item.name}” เข้าตะกร้าให้อัตโนมัติ`
+          : `ปิดแล้ว: ชุด “${item.name}” จะไม่ถูกเพิ่มเข้าตะกร้าเองตอนเริ่ม LIVE`,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'ตั้งค่าเพิ่มตะกร้าอัตโนมัติไม่สำเร็จ');
+    } finally {
+      setSendingId('');
+    }
+  }
+
   async function remove(item: ProductSet) {
     if (sendingId) return;
     if (
@@ -199,6 +245,22 @@ export default function QuickProductSetPanel({ accountId }: { accountId: string 
                 onClick={() => void send(item)}
               >
                 {sendingId === item.id ? 'กำลังดำเนินการ…' : 'ส่งเข้า LIVE'}
+              </button>
+              <button
+                type="button"
+                className={`cyber-btn ${item.autoApply ? 'green' : 'cyan'}`}
+                aria-pressed={item.autoApply}
+                disabled={Boolean(sendingId) || (!item.accountId && !item.autoApply)}
+                title={
+                  item.accountId || item.autoApply
+                    ? 'เมื่อกดเริ่มไลฟ์ ระบบจะเพิ่มชุดนี้เข้าตะกร้าให้เอง (เลือกได้ 1 ชุดต่อบัญชี)'
+                    : 'ต้องผูกชุดนี้กับบัญชี LIVE ก่อน'
+                }
+                onClick={() => void toggleAuto(item)}
+              >
+                {item.autoApply
+                  ? '✓ เพิ่มตะกร้าอัตโนมัติตอนเริ่มไลฟ์: เปิด'
+                  : 'เพิ่มตะกร้าอัตโนมัติตอนเริ่มไลฟ์: ปิด'}
               </button>
               {item.hasDelete && (
                 <button

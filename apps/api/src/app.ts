@@ -422,6 +422,26 @@ export function createApp(
     }
   });
 
+  app.post('/api/v1/live/product-sets/:id/auto', async (request, reply) => {
+    if (!productSetStore) return reply.status(503).send({ error: 'Product sets are unavailable.' });
+    const ownerId = ownerFromHeaders(request.headers);
+    if (!ownerId) return reply.status(401).send({ error: 'Unauthorized.' });
+    const { id } = request.params as { id: string };
+    if (!validAccountId(id)) return reply.status(400).send({ error: 'Invalid product set ID.' });
+    const body = request.body as { enabled?: unknown } | null;
+    if (!body || typeof body !== 'object' || typeof body.enabled !== 'boolean')
+      return reply.status(400).send({ error: 'enabled must be true or false.' });
+    try {
+      const result = await productSetStore.setAutoApply(ownerId, id, body.enabled);
+      if (result === 'not-found')
+        return reply.status(404).send({ error: 'Product set not found.' });
+      if (result === 'no-account')
+        return reply.status(409).send({ error: 'Link an account to this set first.' });
+      return { id, autoApply: body.enabled };
+    } catch {
+      return reply.status(503).send({ error: 'Product set could not be updated.' });
+    }
+  });
   app.post('/api/v1/live/product-sets/:id/send', async (request, reply) => {
     if (!productSetStore || !accountConfig)
       return reply.status(503).send({ error: 'Product sets are unavailable.' });
