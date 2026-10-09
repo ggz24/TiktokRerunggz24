@@ -212,6 +212,10 @@ function AccountAiSettings({ accountId }: { accountId: string }) {
           การส่งแชทและการรับคอมเมนต์เป็นคนละส่วน เปิดโหมดไว้ได้ก่อนเริ่มไลฟ์
           ระบบจะตอบจริงเมื่อทั้งสองส่วนเชื่อมต่อพร้อม หน้านี้ตรวจสถานะซ้ำให้อัตโนมัติ
         </p>
+        <CopyKeyword
+          text="streamer_desktop/message/chat"
+          hint="พิมพ์คำนี้ในช่อง Filter ของแท็บ Network (F12) แล้วคัดลอกคำขอที่ส่งแชทสำเร็จเป็น cURL"
+        />
         <label>
           เชื่อมส่งแชทด้วย session ของบัญชี
           <textarea
@@ -591,6 +595,35 @@ function AccountAiSettings({ accountId }: { accountId: string }) {
           {busy ? 'กำลังดำเนินการ…' : 'บันทึกการตั้งค่า AI'}
         </button>
       </footer>
+    </div>
+  );
+}
+
+function CopyKeyword({ text, hint }: { text: string; hint: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const area = document.createElement('textarea');
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      area.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }
+  return (
+    <div className="cyber-copy-keyword">
+      <small>{hint}</small>
+      <span>
+        <code>{text}</code>
+        <button className="cyber-btn cyan" type="button" onClick={() => void copy()}>
+          {copied ? 'คัดลอกแล้ว ✓' : 'คัดลอก'}
+        </button>
+      </span>
     </div>
   );
 }

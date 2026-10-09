@@ -3061,3 +3061,32 @@
   color: #fff;
   overflow-wrap: anywhere;
 }
+.cyber-copy-keyword {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0;
+}
+.cyber-copy-keyword small {
+  color: var(--cyber-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.cyber-copy-keyword span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cyber-copy-keyword code {
+  padding: 5px 9px;
+  border: 1px solid #8d79c4;
+  background: #1c1a33;
+  color: var(--cyber-cyan);
+  font-size: 12px;
+  user-select: all;
+}
+.cyber-copy-keyword .cyber-btn {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 10px;
+}
