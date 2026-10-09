@@ -770,6 +770,12 @@ export default function CyberShell({ section, username }: { section: Page; usern
                           ? 'ส่งสัญญาณล้มเหลว'
                           : 'ยังไม่ส่งสัญญาณ'}
               </Badge>
+              {connected && (
+                <AccountStatusPanel
+                  status={accountStatus[account.id]}
+                  loaded={accountStatusLoaded}
+                />
+              )}
             </div>
             {connected && account.verifiedAt && (
               <div className="cyber-account-note">
@@ -781,9 +787,6 @@ export default function CyberShell({ section, username }: { section: Page; usern
             )}
           </div>
         </div>
-        {connected && (
-          <AccountStatusPanel status={accountStatus[account.id]} loaded={accountStatusLoaded} />
-        )}
         <div className="cyber-card-actions">
           <Btn
             tone="cyan"

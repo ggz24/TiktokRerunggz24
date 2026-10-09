@@ -145,6 +145,35 @@ function autoLine(auto: AccountStatus['auto']): { tone: Tone; label: string; det
   return { tone: 'green', label: 'ทำงาน · รอเวลาขึ้นไลฟ์', detail };
 }
 
+function shortCart(status: AccountStatus): { tone: Tone; label: string } {
+  const state = status.cart?.state;
+  if (!status.hasOpenRoom) return { tone: 'dim', label: 'ตะกร้า: ยังไม่ LIVE' };
+  if (state === 'added') return { tone: 'green', label: 'ปักตะกร้าแล้ว' };
+  if (state === 'removed') return { tone: 'yellow', label: 'ลบตะกร้าแล้ว' };
+  if (state === 'rejected') return { tone: 'pink', label: 'ปักตะกร้าไม่สำเร็จ' };
+  if (state === 'unverified') return { tone: 'yellow', label: 'ปักตะกร้า: ยืนยันไม่ได้' };
+  return { tone: 'yellow', label: 'ยังไม่ได้ปักตะกร้า' };
+}
+
+function shortAi(ai: AccountStatus['ai']): { tone: Tone; label: string } {
+  if (!ai) return { tone: 'dim', label: 'AI ช่วยตอบ: ?' };
+  if (!ai.enabled) return { tone: 'dim', label: 'AI ช่วยตอบ: ปิด' };
+  if (!ai.aiReady) return { tone: 'pink', label: 'AI ช่วยตอบ: เปิด (ไม่มี key)' };
+  if (!ai.chatConnected) return { tone: 'yellow', label: 'AI ช่วยตอบ: เปิด (รอแชท)' };
+  return { tone: 'green', label: 'AI ช่วยตอบ: เปิด' };
+}
+
+function shortAuto(auto: AccountStatus['auto']): { tone: Tone; label: string } {
+  if (!auto) return { tone: 'dim', label: 'ขึ้น/ลงไลฟ์อัตโนมัติ: ?' };
+  if (auto.lastError) return { tone: 'pink', label: 'ขึ้น/ลงไลฟ์อัตโนมัติ: ผิดพลาด' };
+  const timed =
+    auto.dailyStartTime || auto.endAfterMinutes || auto.restartAfterMinutes || auto.recoverStream;
+  return timed
+    ? { tone: 'green', label: 'ขึ้น/ลงไลฟ์อัตโนมัติ: เปิด' }
+    : { tone: 'dim', label: 'ขึ้น/ลงไลฟ์อัตโนมัติ: ปิด' };
+}
+
+/** Small status chips for the account card; the details are in each chip's tooltip. */
 export default function AccountStatusPanel({
   status,
   loaded,
@@ -152,29 +181,24 @@ export default function AccountStatusPanel({
   status: AccountStatus | undefined;
   loaded: boolean;
 }) {
-  if (!loaded || !status)
-    return (
-      <div className="cyber-status-panel" aria-live="polite">
-        <p className="cyber-account-note">{loaded ? 'ตรวจสถานะบัญชีไม่ได้' : 'กำลังตรวจสถานะ…'}</p>
-      </div>
-    );
-  const rows = [
-    { key: 'cart', title: '🛒 ตะกร้าสินค้า', ...cartLine(status) },
-    { key: 'ai', title: '🤖 AI ช่วยตอบ', ...aiLine(status.ai) },
-    { key: 'auto', title: '⏱ ขึ้น/ลงไลฟ์อัตโนมัติ', ...autoLine(status.auto) },
+  if (!loaded || !status) return null;
+  const chips = [
+    { key: 'cart', ...shortCart(status), detail: cartLine(status) },
+    { key: 'ai', ...shortAi(status.ai), detail: aiLine(status.ai) },
+    { key: 'auto', ...shortAuto(status.auto), detail: autoLine(status.auto) },
   ];
   return (
-    <div className="cyber-status-panel" aria-live="polite">
-      {rows.map((row) => (
-        <div className={`cyber-status-row tone-${row.tone}`} key={row.key}>
-          <span className="cyber-status-title">{row.title}</span>
-          <strong>{row.label}</strong>
-          {row.detail && <small>{row.detail}</small>}
-        </div>
+    <>
+      {chips.map((chip) => (
+        <span
+          className={`cyber-badge ${chip.tone}`}
+          key={chip.key}
+          title={[chip.detail.label, chip.detail.detail].filter(Boolean).join(' · ')}
+        >
+          {chip.key === 'cart' ? '🛒 ' : ''}
+          {chip.label}
+        </span>
       ))}
-      <p className="cyber-account-note">
-        สถานะตะกร้าอ้างอิงจากคำสั่งที่ Live Hub ส่งในห้องนี้ (TikTok ไม่เปิดให้อ่านตะกร้าจริง)
-      </p>
-    </div>
+    </>
   );
 }
